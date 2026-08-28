@@ -575,15 +575,49 @@ function Agenda() {
             const dayAppts = (appts.data ?? []).filter((a) => isSameDay(new Date(a.starts_at), d));
             return (
               <div key={di} className="relative border-r border-white/5 last:border-r-0">
-                {SLOTS.map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => openNewAt(d, m)}
-                    style={{ height: SLOT_PX }}
-                    aria-label={`Nueva cita ${fmtSlot(m)}`}
-                    className={`w-full block hover:bg-white/[0.06] transition border-b ${m % 60 === 0 ? "border-white/10" : "border-white/[0.04]"}`}
-                  />
-                ))}
+                {SLOTS.map((m) => {
+                  const blocked = isSlotBlocked(d, m);
+                  const taken = dayAppts.some((a) => {
+                    const s = new Date(a.starts_at);
+                    const e = new Date(a.ends_at);
+                    const sm = s.getHours() * 60 + s.getMinutes();
+                    const em = e.getHours() * 60 + e.getMinutes();
+                    return m < em && m + SLOT_MIN > sm;
+                  });
+                  return (
+                    <div key={m} style={{ height: SLOT_PX }} className="relative group/slot">
+                      <button
+                        onClick={() => (blocked ? toggleSlotBlock(d, m) : openNewAt(d, m))}
+                        style={{ height: SLOT_PX }}
+                        aria-label={blocked ? `Liberar franja ${fmtSlot(m)}` : `Nueva cita ${fmtSlot(m)}`}
+                        className={`w-full block transition border-b ${m % 60 === 0 ? "border-white/10" : "border-white/[0.04]"} ${
+                          blocked
+                            ? "bg-[repeating-linear-gradient(45deg,rgba(244,63,94,0.35)_0_6px,transparent_6px_12px)] hover:bg-rose-500/30"
+                            : "hover:bg-white/[0.06]"
+                        }`}
+                      />
+                      {!taken && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSlotBlock(d, m);
+                          }}
+                          className={`absolute right-0.5 top-0.5 z-10 rounded p-0.5 transition ${
+                            blocked
+                              ? "bg-rose-500 text-white opacity-100"
+                              : "bg-white/15 text-neutral-100 opacity-0 group-hover/slot:opacity-100"
+                          }`}
+                          aria-label={blocked ? `Liberar franja ${fmtSlot(m)}` : `Bloquear franja ${fmtSlot(m)}`}
+                          title={blocked ? "Franja bloqueada — toca para liberar" : "Bloquear esta franja"}
+                        >
+                          {blocked ? <LockOpen className="h-2.5 w-2.5" /> : <Lock className="h-2.5 w-2.5" />}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
                 {dayAppts.map((a) => {
                   const start = new Date(a.starts_at);
                   const end = new Date(a.ends_at);
