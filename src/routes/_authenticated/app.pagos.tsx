@@ -400,7 +400,9 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
                 if (!t) return;
                 setClientId(t.client_id);
                 setServiceId(t.service_id ?? "");
-                if (!amount) setAmount((t.session_price_cents / 100).toString());
+                setTotal((t.total_cents / 100).toString());
+                setAmount((t.balance_cents / 100).toString());
+
               }}
             >
               <option value="">Sin tratamiento</option>
