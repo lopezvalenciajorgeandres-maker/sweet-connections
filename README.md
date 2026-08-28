@@ -1,4 +1,4 @@
-# Sweet Connections
+# Embrace Everyday
 
 lovable
 
@@ -6,7 +6,7 @@ This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/a03c47fc-8859-418f-9008-2851ad5b12e9).
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/734104c6-7f46-437f-ab4c-ac19fc12952d).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
 - **Stay in sync**: every change made in Lovable is committed straight to this repository.
