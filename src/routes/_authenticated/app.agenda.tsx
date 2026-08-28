@@ -142,6 +142,24 @@ function Agenda() {
   });
 
 
+  const pendingOnline = useMemo(
+    () =>
+      [...(appts.data ?? [])]
+        .filter((a: any) => a.status === "pending")
+        .sort((a: any, b: any) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()),
+    [appts.data],
+  );
+
+  const statusMut = useMutation({
+    mutationFn: (v: { id: string; status: "scheduled" | "cancelled" }) => update({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      toast.success(v.status === "scheduled" ? "Reserva confirmada" : "Reserva rechazada — horario liberado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar la reserva"),
+  });
+
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
     onSuccess: () => {
