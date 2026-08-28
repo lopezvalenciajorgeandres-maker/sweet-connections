@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { listClients, createClient } from "@/lib/clients.functions";
 import { listServices } from "@/lib/services.functions";
 import { createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
-import { ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
