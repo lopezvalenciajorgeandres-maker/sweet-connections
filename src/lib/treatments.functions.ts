@@ -66,9 +66,13 @@ export const listTreatments = createServerFn({ method: "GET" })
       paidBy.set(p.treatment_id, (paidBy.get(p.treatment_id) ?? 0) + (p.amount_cents ?? 0));
     }
     const doneBy = new Map<string, number>();
+    const scheduledBy = new Map<string, number>();
     for (const a of appts ?? []) {
       if (!a.treatment_id || a.status === "cancelled") continue;
-      doneBy.set(a.treatment_id, (doneBy.get(a.treatment_id) ?? 0) + 1);
+      scheduledBy.set(a.treatment_id, (scheduledBy.get(a.treatment_id) ?? 0) + 1);
+      if (a.status === "completed") {
+        doneBy.set(a.treatment_id, (doneBy.get(a.treatment_id) ?? 0) + 1);
+      }
     }
 
     return ((rows ?? []) as any[]).map((t) => {
@@ -93,6 +97,7 @@ export const listTreatments = createServerFn({ method: "GET" })
         sessions_paid: sessionsPaid,
         sessions_remaining: Math.max(0, sessions - sessionsPaid),
         sessions_done: doneBy.get(t.id) ?? 0,
+        sessions_scheduled: scheduledBy.get(t.id) ?? 0,
         settled: total - paid <= 0,
         closed_at: t.closed_at ?? null,
         created_at: t.created_at,
