@@ -176,7 +176,7 @@ function Payments() {
                   <div className="text-xs text-muted-foreground">
                     Total {formatMoney(t.total_cents, tenant.currency)} · Abonado{" "}
                     {formatMoney(t.paid_cents, tenant.currency)} · Sesiones pagadas {t.sessions_paid}/{t.sessions_total}
-                    {" · "}Sesiones agendadas {t.sessions_done}
+                    {" · "}Sesiones realizadas {t.sessions_done}
                   </div>
                 </div>
                 <span
