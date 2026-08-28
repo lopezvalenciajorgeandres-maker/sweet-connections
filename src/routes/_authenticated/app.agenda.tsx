@@ -1,0 +1,1268 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { listClients, createClient } from "@/lib/clients.functions";
+import { listServices } from "@/lib/services.functions";
+import { createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
+import { ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ClientForm, type ClientPayload } from "@/components/app/client-form";
+import { Modal } from "@/components/app/kit";
+import { BackupButtons } from "@/components/app/backup-buttons";
+import { createTreatment, listTreatments, updateTreatment, type TreatmentSummary } from "@/lib/treatments.functions";
+import { useTenant } from "@/lib/use-tenant";
+import { formatMoney } from "@/lib/plan";
+
+
+export const Route = createFileRoute("/_authenticated/app/agenda")({
+  head: () => ({
+    meta: [
+      { title: "Agenda de citas — Eleva System" },
+      {
+        name: "description",
+        content: "Gestiona citas, clientes y recordatorios manuales de WhatsApp desde la agenda de Eleva System.",
+      },
+      { property: "og:title", content: "Agenda de citas — Eleva System" },
+      {
+        property: "og:description",
+        content: "Agenda semanal para gestionar citas y enviar recordatorios manuales por WhatsApp.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
+  component: Agenda,
+});
+
+const DAY_NAMES = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+const HOURS = Array.from({ length: 16 }, (_, i) => i + 6); // 06..21
+const SLOT_MIN = 15; // franjas de 15 minutos
+const SLOT_PX = 22; // px por franja de 15 min
+const SLOT_HEIGHT = SLOT_PX * (60 / SLOT_MIN); // px por hora
+const SLOTS = Array.from(
+  { length: HOURS.length * (60 / SLOT_MIN) },
+  (_, i) => HOURS[0] * 60 + i * SLOT_MIN,
+); // 360, 375, ...
+const fmtSlot = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+function startOfWeek(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  const day = (x.getDay() + 6) % 7; // Monday=0
+  x.setDate(x.getDate() - day);
+  return x;
+}
+
+function Agenda() {
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [presetDay, setPresetDay] = useState<Date | null>(null);
+  const [modal, setModal] = useState(false);
+  const [reminder, setReminder] = useState<WhatsAppReminder | null>(null);
+  const [editAppt, setEditAppt] = useState<any | null>(null);
+  const [drag, setDrag] = useState<{
+    id: string;
+    grabDy: number;
+    colWidth: number;
+    dayIndex: number;
+    minutes: number;
+    moved: boolean;
+  } | null>(null);
+  const [resize, setResize] = useState<{
+    id: string;
+    edge: "top" | "bottom";
+    startMin: number;
+    endMin: number;
+    moved: boolean;
+  } | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+
+  const qc = useQueryClient();
+  const getAppts = useServerFn(listAppointments);
+  const getClients = useServerFn(listClients);
+  const getServices = useServerFn(listServices);
+  const create = useServerFn(createAppointment);
+  const del = useServerFn(deleteAppointment);
+  const update = useServerFn(updateAppointment);
+  const createCli = useServerFn(createClient);
+  const createTreat = useServerFn(createTreatment);
+  const updateTreat = useServerFn(updateTreatment);
+  const getTreatments = useServerFn(listTreatments);
+  const tenant = useTenant();
+
+  const from = new Date(weekStart);
+  const to = new Date(weekStart);
+  to.setDate(to.getDate() + 7);
+  to.setMilliseconds(-1);
+
+  const appts = useQuery({
+    queryKey: ["appts", "week", weekStart.toISOString()],
+    queryFn: () => getAppts({ data: { from: from.toISOString(), to: to.toISOString() } }),
+  });
+  const clients = useQuery({ queryKey: ["clients"], queryFn: () => getClients() });
+  const services = useQuery({ queryKey: ["services"], queryFn: () => getServices() });
+  const treatments = useQuery({
+    queryKey: ["treatments"],
+    queryFn: () => getTreatments(),
+    
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => del({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      toast.success("Cita eliminada");
+    },
+  });
+
+  const moveMut = useMutation({
+    mutationFn: (v: { id: string; starts_at: string; ends_at: string; service_id?: string | null; price_cents?: number | null }) =>
+      update({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      const d = new Date(v.starts_at);
+      toast.success(
+        `Cita reagendada: ${d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "short" })} ${d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}`,
+      );
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo reagendar la cita"),
+  });
+
+  const updateTreatMut = useMutation({
+    mutationFn: (v: { id: string; total_cents?: number; sessions_total?: number }) => updateTreat({ data: v }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["treatments"] });
+      toast.success("Tratamiento actualizado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
+  });
+
+  const days = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + i);
+      return d;
+    }),
+    [weekStart],
+  );
+
+  // Convierte la posición del puntero en día + minutos (franjas de 15 min),
+  // usando el punto donde el usuario agarró la tarjeta.
+  function pointToSlot(clientX: number, clientY: number, grabDy: number) {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const rect = grid.getBoundingClientRect();
+    const colWidth = (rect.width - 72) / 7;
+    const dayIndex = Math.min(6, Math.max(0, Math.floor((clientX - rect.left - 72) / colWidth)));
+    const topY = clientY - grabDy - rect.top;
+    const rawMin = HOURS[0] * 60 + (topY / SLOT_HEIGHT) * 60;
+    const snapped = Math.round(rawMin / SLOT_MIN) * SLOT_MIN;
+    const minutes = Math.min(
+      Math.max(snapped, HOURS[0] * 60),
+      (HOURS[HOURS.length - 1] + 1) * 60 - SLOT_MIN,
+    );
+    return { dayIndex, minutes, colWidth };
+  }
+
+  function startDrag(e: React.PointerEvent, a: any) {
+    if ((e.target as HTMLElement).closest("button")) return;
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    e.preventDefault();
+    const cardRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const grabDy = e.clientY - cardRect.top;
+    const slot = pointToSlot(e.clientX, e.clientY, grabDy);
+    if (!slot) return;
+    setDrag({ id: a.id, grabDy, colWidth: slot.colWidth, dayIndex: slot.dayIndex, minutes: slot.minutes, moved: false });
+  }
+
+  function startResize(e: React.PointerEvent, a: any, edge: "top" | "bottom") {
+    e.preventDefault();
+    e.stopPropagation();
+    const s = new Date(a.starts_at);
+    const en = new Date(a.ends_at);
+    setResize({
+      id: a.id,
+      edge,
+      startMin: s.getHours() * 60 + s.getMinutes(),
+      endMin: en.getHours() * 60 + en.getMinutes(),
+      moved: false,
+    });
+  }
+
+  useEffect(() => {
+    if (!resize) return;
+    const onMove = (e: PointerEvent) => {
+      const slot = pointToSlot(e.clientX, e.clientY, 0);
+      if (!slot) return;
+      setResize((r) => {
+        if (!r) return r;
+        if (r.edge === "top") {
+          const startMin = Math.min(slot.minutes, r.endMin - SLOT_MIN);
+          return startMin === r.startMin ? r : { ...r, startMin, moved: true };
+        }
+        const endMin = Math.max(slot.minutes, r.startMin + SLOT_MIN);
+        return endMin === r.endMin ? r : { ...r, endMin, moved: true };
+      });
+    };
+    const onUp = () => {
+      const cur = resize;
+      setResize(null);
+      if (!cur?.moved) return;
+      const appt = (appts.data ?? []).find((x: any) => x.id === cur.id) as any;
+      if (!appt) return;
+      const base = new Date(appt.starts_at);
+      const starts = new Date(base);
+      starts.setHours(Math.floor(cur.startMin / 60), cur.startMin % 60, 0, 0);
+      const ends = new Date(base);
+      ends.setHours(Math.floor(cur.endMin / 60), cur.endMin % 60, 0, 0);
+      moveMut.mutate({ id: cur.id, starts_at: starts.toISOString(), ends_at: ends.toISOString() });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  });
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (e: PointerEvent) => {
+      const slot = pointToSlot(e.clientX, e.clientY, drag.grabDy);
+      if (!slot) return;
+      setDrag((d) =>
+        d
+          ? {
+              ...d,
+              colWidth: slot.colWidth,
+              dayIndex: slot.dayIndex,
+              minutes: slot.minutes,
+              moved: d.moved || slot.dayIndex !== d.dayIndex || slot.minutes !== d.minutes,
+            }
+          : d,
+      );
+    };
+    const onUp = () => {
+      const cur = drag;
+      setDrag(null);
+      if (!cur?.moved) return;
+      const appt = (appts.data ?? []).find((x: any) => x.id === cur.id) as any;
+      if (!appt) return;
+      const target = new Date(days[cur.dayIndex]);
+      target.setHours(Math.floor(cur.minutes / 60), cur.minutes % 60, 0, 0);
+      const oldStart = new Date(appt.starts_at);
+      const duration = new Date(appt.ends_at).getTime() - oldStart.getTime();
+      if (target.getTime() === oldStart.getTime()) return;
+      moveMut.mutate({
+        id: cur.id,
+        starts_at: target.toISOString(),
+        ends_at: new Date(target.getTime() + duration).toISOString(),
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  });
+
+  const rangeLabel = useMemo(() => {
+    const end = days[6];
+    const sameMonth = weekStart.getMonth() === end.getMonth();
+    const a = weekStart.toLocaleDateString("es", { day: "numeric", month: sameMonth ? undefined : "short" });
+    const b = end.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" });
+    return `${a} — ${b}`;
+  }, [days, weekStart]);
+
+  function shiftWeek(delta: number) {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + delta * 7);
+    setWeekStart(d);
+  }
+
+  function toWeekInput(d: Date) {
+    const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayNum = (t.getDay() + 6) % 7;
+    t.setDate(t.getDate() - dayNum + 3);
+    const firstThursday = new Date(t.getFullYear(), 0, 4);
+    const fDayNum = (firstThursday.getDay() + 6) % 7;
+    firstThursday.setDate(firstThursday.getDate() - fDayNum + 3);
+    const week = 1 + Math.round((t.getTime() - firstThursday.getTime()) / (7 * 86400000));
+    return `${t.getFullYear()}-W${String(week).padStart(2, "0")}`;
+  }
+
+  function fromWeekInput(value: string) {
+    const m = /^(\d{4})-W(\d{2})$/.exec(value);
+    if (!m) return;
+    const year = Number(m[1]);
+    const week = Number(m[2]);
+    const jan4 = new Date(year, 0, 4);
+    const jan4Day = (jan4.getDay() + 6) % 7;
+    const monday = new Date(jan4);
+    monday.setDate(jan4.getDate() - jan4Day + (week - 1) * 7);
+    setWeekStart(startOfWeek(monday));
+  }
+
+  const today = new Date();
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  function openNewAt(d: Date, minutes?: number) {
+    const day = new Date(d);
+    if (minutes !== undefined) day.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    setPresetDay(day);
+    setModal(true);
+  }
+
+  return (
+    <div className="p-4 md:p-8 max-w-[1400px]">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="font-serif text-3xl md:text-4xl">Agenda</h1>
+          <div className="mt-1 flex items-center gap-3 flex-wrap">
+            <p className="text-muted-foreground capitalize">{rangeLabel}</p>
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="sr-only">Buscar semana</span>
+              <div className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => shiftWeek(-1)}
+                  className="p-1.5 rounded-lg border border-border hover:bg-secondary"
+                  aria-label="Semana anterior"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <input
+                  type="week"
+                  value={toWeekInput(weekStart)}
+                  onChange={(e) => fromWeekInput(e.target.value)}
+                  className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground"
+                  aria-label="Buscar semana"
+                />
+                <button
+                  type="button"
+                  onClick={() => shiftWeek(1)}
+                  className="p-1.5 rounded-lg border border-border hover:bg-secondary"
+                  aria-label="Semana siguiente"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => shiftWeek(-1)} className="p-2 rounded-lg border border-border hover:bg-secondary" aria-label="Semana anterior"><ChevronLeft className="h-4 w-4" /></button>
+          <button onClick={() => setWeekStart(startOfWeek(new Date()))} className="px-3 py-2 text-sm rounded-lg border border-border hover:bg-secondary">Hoy</button>
+          <button onClick={() => shiftWeek(1)} className="p-2 rounded-lg border border-border hover:bg-secondary" aria-label="Semana siguiente"><ChevronRight className="h-4 w-4" /></button>
+          <BackupButtons />
+
+          <button onClick={() => { setPresetDay(null); setModal(true); }} className="ml-2 inline-flex items-center gap-2 rounded-full bg-primary text-primary-foreground px-4 py-2 text-sm font-medium">
+            <Plus className="h-4 w-4" /> Nueva cita
+          </button>
+        </div>
+      </div>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Consejo: arrastra una cita y suéltala en otro día u hora para reagendarla automáticamente.
+      </p>
+
+      <div className="mt-6 rounded-2xl overflow-x-auto border border-[#2a2320] bg-[#1a1512] text-neutral-100 shadow-lg">
+        <div className="min-w-[820px]">
+        {/* Header row */}
+        <div className="grid" style={{ gridTemplateColumns: `72px repeat(7, minmax(0,1fr))` }}>
+          <div className="border-b border-r border-white/5" />
+          {days.map((d, i) => {
+            const active = isSameDay(d, today);
+            return (
+              <div key={i} className="border-b border-white/5 py-3 text-center">
+                <div className="text-[11px] uppercase tracking-wider text-neutral-400">{DAY_NAMES[i]}</div>
+                <div className={`mt-1 mx-auto w-9 h-9 flex items-center justify-center rounded-full text-lg font-medium ${active ? "bg-primary text-primary-foreground" : "text-neutral-100"}`}>
+                  {d.getDate()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Body grid */}
+        <div ref={gridRef} className="relative grid" style={{ gridTemplateColumns: `72px repeat(7, minmax(0,1fr))` }}>
+          {/* Franjas de 15 minutos */}
+          <div className="border-r border-white/5">
+            {SLOTS.map((m) => (
+              <div
+                key={m}
+                style={{ height: SLOT_PX }}
+                className={`text-[10px] text-right pr-2 leading-[22px] border-b border-white/5 ${m % 60 === 0 ? "text-neutral-300 font-medium" : "text-neutral-500"}`}
+              >
+                {fmtSlot(m)}
+              </div>
+            ))}
+          </div>
+
+          {/* Day columns */}
+          {days.map((d, di) => {
+            const dayAppts = (appts.data ?? []).filter((a) => isSameDay(new Date(a.starts_at), d));
+            return (
+              <div key={di} className="relative border-r border-white/5 last:border-r-0">
+                {SLOTS.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => openNewAt(d, m)}
+                    style={{ height: SLOT_PX }}
+                    aria-label={`Nueva cita ${fmtSlot(m)}`}
+                    className={`w-full block hover:bg-white/[0.06] transition border-b ${m % 60 === 0 ? "border-white/10" : "border-white/[0.04]"}`}
+                  />
+                ))}
+                {dayAppts.map((a) => {
+                  const start = new Date(a.starts_at);
+                  const end = new Date(a.ends_at);
+                  const startMin = start.getHours() * 60 + start.getMinutes();
+                  const endMin = end.getHours() * 60 + end.getMinutes();
+                  const resizing = resize?.id === a.id ? resize : null;
+                  const shownStart = resizing ? resizing.startMin : startMin;
+                  const shownEnd = resizing ? resizing.endMin : endMin;
+                  const top = ((shownStart - HOURS[0] * 60) / 60) * SLOT_HEIGHT;
+                  const height = Math.max(28, ((shownEnd - shownStart) / 60) * SLOT_HEIGHT - 2);
+                  const color = (a as any).service?.color ?? "#CDB4DB";
+                  const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
+                  const waReminder = phone ? buildWhatsAppReminder(phone, a) : null;
+                  const dragging = drag?.id === a.id && drag.moved;
+                  const previewTop = dragging ? ((drag!.minutes - HOURS[0] * 60) / 60) * SLOT_HEIGHT : top;
+                  return (
+                    <div
+                      key={a.id}
+                      data-appt-card={a.id}
+                      onPointerDown={(e) => startDrag(e, a)}
+                      className={`absolute left-1 right-1 rounded-md p-1.5 pr-9 text-[11px] leading-tight overflow-visible group cursor-grab active:cursor-grabbing touch-none select-none ${dragging ? "z-40 shadow-2xl ring-2 ring-white/70" : ""}`}
+                      style={{
+                        top,
+                        height,
+                        background: color,
+                        color: readableText(color),
+                        transform: dragging
+                          ? `translate(${(drag!.dayIndex - di) * drag!.colWidth}px, ${previewTop - top}px)`
+                          : undefined,
+                      }}
+                      title={`${(a as any).client?.full_name} — ${(a as any).service?.name ?? ""}`}
+                    >
+                      {dragging && (
+                        <div className="absolute -top-5 left-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow">
+                          {DAY_NAMES[drag!.dayIndex]} {fmtSlot(drag!.minutes)}
+                        </div>
+                      )}
+                      {resizing && (
+                        <div className="absolute -top-5 left-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow">
+                          {fmtSlot(shownStart)} – {fmtSlot(shownEnd)}
+                        </div>
+                      )}
+                      <div
+                        onPointerDown={(e) => startResize(e, a, "top")}
+                        className="absolute left-0 right-0 -top-1 h-2.5 cursor-ns-resize touch-none"
+                        title="Arrastra para cambiar la hora de inicio"
+                      >
+                        <div className="mx-auto mt-1 h-0.5 w-8 rounded-full bg-foreground/30 opacity-0 group-hover:opacity-100" />
+                      </div>
+                      <div
+                        onPointerDown={(e) => startResize(e, a, "bottom")}
+                        className="absolute left-0 right-0 -bottom-1 h-2.5 cursor-ns-resize touch-none z-30"
+                        title="Arrastra para cambiar la hora final"
+                      >
+                        <div className="mx-auto mt-1 h-0.5 w-8 rounded-full bg-foreground/30 opacity-0 group-hover:opacity-100" />
+                      </div>
+                      <div className="font-semibold truncate">{(a as any).client?.full_name}</div>
+                      <div className="opacity-80 line-clamp-2">{(a as any).service?.name ?? "Cita"}</div>
+                      <div className="absolute top-1 right-1 z-20 flex flex-col gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="secondary"
+                          onClick={(e) => { e.stopPropagation(); setEditAppt(a); }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="h-7 w-7 rounded-full shadow-md ring-2 ring-background"
+                          aria-label="Editar horario de la cita"
+                          title="Editar hora de inicio y fin"
+                        >
+                          <Clock className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (waReminder) {
+                              setReminder(waReminder);
+                              return;
+                            }
+                            toast.error("Añade un teléfono al cliente para enviar el recordatorio");
+                          }}
+                          className="h-7 w-7 rounded-full bg-accent text-accent-foreground shadow-md ring-2 ring-background hover:bg-accent/90"
+                          aria-label={`Enviar recordatorio de ${(a as any).client?.full_name ?? "la cita"} por WhatsApp`}
+                          title={waReminder ? "Enviar recordatorio por WhatsApp" : "El cliente no tiene teléfono registrado"}
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                        </Button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteMut.mutate(a.id); }}
+                          className="self-end p-0.5 rounded bg-foreground/20 opacity-0 hover:bg-foreground/40 group-hover:opacity-100"
+                          aria-label={`Eliminar cita de ${(a as any).client?.full_name ?? "cliente"}`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+        </div>
+      </div>
+
+      {/* Lista de citas de la semana con recordatorio WhatsApp */}
+      <div className="mt-8">
+        <h2 className="font-serif text-2xl">Recordatorios de WhatsApp</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Envía el recordatorio de cita a cada cliente por WhatsApp (Web, Escritorio o copiando el mensaje).
+        </p>
+        <div className="mt-4 space-y-2">
+          {(appts.data ?? []).length === 0 && (
+            <p className="text-sm text-muted-foreground">No hay citas esta semana.</p>
+          )}
+          {[...(appts.data ?? [])]
+            .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
+            .map((a) => {
+              const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
+              const rem = phone ? buildWhatsAppReminder(phone, a) : null;
+              const start = new Date(a.starts_at);
+              return (
+                <div
+                  key={a.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{(a as any).client?.full_name ?? "Cliente"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {start.toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" })} ·{" "}
+                      {start.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
+                      {(a as any).service?.name ? ` · ${(a as any).service.name}` : ""}
+                    </div>
+                  </div>
+                  {rem ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditAppt(a)}
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm hover:bg-secondary"
+                    >
+                      <Clock className="h-4 w-4" /> Editar horario
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReminder(rem)}
+                      className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                    >
+                      <MessageCircle className="h-4 w-4" /> Enviar recordatorio
+                    </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditAppt(a)}
+                        className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm hover:bg-secondary"
+                      >
+                        <Clock className="h-4 w-4" /> Editar horario
+                      </button>
+                      <span className="text-xs text-muted-foreground">Sin teléfono registrado</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
+      {modal && (
+        <NewApptModal
+          day={presetDay ?? days[0]}
+          clients={clients.data ?? []}
+          services={services.data ?? []}
+          treatments={treatments.data ?? []}
+          canTreatments
+          currency={tenant.currency}
+          onClose={() => setModal(false)}
+          onCreate={async (payload, newClient, newTreatment) => {
+            try {
+              let clientId = payload.client_id;
+              if (newClient) {
+                const c = await createCli({ data: newClient });
+                clientId = c.id;
+                await qc.invalidateQueries({ queryKey: ["clients"] });
+              }
+              let treatmentId = payload.treatment_id ?? null;
+              if (newTreatment) {
+                const t = await createTreat({
+                  data: {
+                    client_id: clientId,
+                    service_id: payload.service_id,
+                    total_cents: newTreatment.total_cents,
+                    sessions_total: newTreatment.sessions_total,
+                  },
+                });
+                treatmentId = (t as any).id;
+              }
+              await create({ data: { ...payload, client_id: clientId, treatment_id: treatmentId } });
+              qc.invalidateQueries({ queryKey: ["appts"] });
+              qc.invalidateQueries({ queryKey: ["treatments"] });
+              qc.invalidateQueries({ queryKey: ["receivables"] });
+              toast.success("Cita creada");
+              setModal(false);
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Error");
+            }
+          }}
+        />
+      )}
+
+      {reminder && (
+        <WhatsAppReminderModal
+          reminder={reminder}
+          onClose={() => setReminder(null)}
+        />
+      )}
+
+      {editAppt && (
+        <EditTimeModal
+          appt={editAppt}
+          services={services.data ?? []}
+          treatments={treatments.data ?? []}
+          currency={tenant.currency}
+          onClose={() => setEditAppt(null)}
+          onSave={(v) => {
+            moveMut.mutate({ id: editAppt.id, ...v });
+            setEditAppt(null);
+          }}
+          onUpdateTreatment={(v) => updateTreatMut.mutate(v)}
+        />
+      )}
+    </div>
+  );
+}
+
+function toTimeInput(d: Date) {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+function toDateInput(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function EditTimeModal({
+  appt,
+  services,
+  treatments,
+  currency,
+  onClose,
+  onSave,
+  onUpdateTreatment,
+}: {
+  appt: any;
+  services: any[];
+  treatments: TreatmentSummary[];
+  currency: string;
+  onClose: () => void;
+  onSave: (v: { starts_at: string; ends_at: string; service_id: string | null; price_cents: number | null }) => void;
+  onUpdateTreatment: (v: { id: string; total_cents?: number; sessions_total?: number }) => void;
+}) {
+  const s = new Date(appt.starts_at);
+  const e0 = new Date(appt.ends_at);
+  const [date, setDate] = useState(toDateInput(s));
+  const [start, setStart] = useState(toTimeInput(s));
+  const [end, setEnd] = useState(toTimeInput(e0));
+  const [serviceId, setServiceId] = useState<string>(appt.service_id ?? "");
+
+  const treatment = appt.treatment_id
+    ? treatments.find((t) => t.id === appt.treatment_id) ?? null
+    : null;
+  const [treatTotal, setTreatTotal] = useState(() =>
+    treatment ? String(treatment.total_cents / 100) : "",
+  );
+  const [treatSessions, setTreatSessions] = useState(() =>
+    treatment ? String(treatment.sessions_total) : "",
+  );
+
+  function onServiceChange(id: string) {
+    setServiceId(id);
+    const svc = services.find((x) => x.id === id);
+    if (svc?.duration_min && start) {
+      const [h, m] = start.split(":").map(Number);
+      const d = new Date();
+      d.setHours(h ?? 0, (m ?? 0) + svc.duration_min, 0, 0);
+      setEnd(toTimeInput(d));
+    }
+  }
+
+  return (
+    <Modal title="Editar horario de la cita" onClose={onClose}>
+      <form
+        className="space-y-4"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          const starts = new Date(`${date}T${start}:00`);
+          const ends = new Date(`${date}T${end}:00`);
+          if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) return;
+          if (ends.getTime() <= starts.getTime()) {
+            toast.error("La hora final debe ser posterior a la de inicio");
+            return;
+          }
+          const svc = services.find((x) => x.id === serviceId);
+          if (treatment) {
+            const newTotalCents = Math.round((Number(treatTotal) || 0) * 100);
+            const newSessions = Math.max(1, Math.round(Number(treatSessions) || 1));
+            if (newTotalCents !== treatment.total_cents || newSessions !== treatment.sessions_total) {
+              onUpdateTreatment({
+                id: treatment.id,
+                total_cents: newTotalCents !== treatment.total_cents ? newTotalCents : undefined,
+                sessions_total: newSessions !== treatment.sessions_total ? newSessions : undefined,
+              });
+            }
+          }
+          onSave({
+            starts_at: starts.toISOString(),
+            ends_at: ends.toISOString(),
+            service_id: serviceId || null,
+            price_cents: svc?.price_cents ?? null,
+          });
+        }}
+      >
+        <p className="text-sm text-muted-foreground">
+          {appt.client?.full_name ?? "Cliente"}
+          {appt.service?.name ? ` · ${appt.service.name}` : ""}
+        </p>
+        {treatment && (
+          <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Tratamiento</h3>
+              {treatment.settled ? (
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600">
+                  A paz y salvo
+                </span>
+              ) : treatment.status === "closed" ? (
+                <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  Cerrado
+                </span>
+              ) : (
+                <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-600">
+                  En curso
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <div>
+                <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor total</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={treatTotal}
+                  onChange={(e) => setTreatTotal(e.target.value)}
+                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones programadas</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={treatSessions}
+                  onChange={(e) => setTreatSessions(e.target.value)}
+                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones realizadas</div>
+                <div className="font-medium">{treatment.sessions_done}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones restantes</div>
+                <div className="font-medium">
+                  {Math.max(
+                    0,
+                    (Number(treatSessions) || treatment.sessions_total) - treatment.sessions_done,
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Abonado</div>
+                <div className="font-medium">{formatMoney(treatment.paid_cents, currency)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Saldo pendiente</div>
+                <div className="font-medium text-amber-600">{formatMoney(treatment.balance_cents, currency)}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        <div>
+          <label className="text-xs text-muted-foreground">Fecha</label>
+          <input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground">Hora de inicio</label>
+            <input type="time" step={900} value={start} onChange={(ev) => setStart(ev.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Hora final</label>
+            <input type="time" step={900} value={end} onChange={(ev) => setEnd(ev.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Servicio</label>
+          <select
+            value={serviceId}
+            onChange={(ev) => onServiceChange(ev.target.value)}
+            className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="">Sin servicio</option>
+            {services.map((sv) => (
+              <option key={sv.id} value={sv.id}>
+                {sv.name}
+                {sv.price_cents ? ` · $${(sv.price_cents / 100).toLocaleString("es")}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-muted-foreground">Añádelo si olvidaste elegirlo al agendar.</p>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border">Cancelar</button>
+          <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground">Guardar horario</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function readableText(hex: string) {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return "#1a1512";
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 150 ? "#1a1512" : "#f7f2ee";
+}
+
+function normalizePhone(raw: string): string | null {
+  const digits = raw.replace(/[^\d]/g, "");
+  return digits.length >= 7 ? digits : null;
+}
+
+type WhatsAppReminder = {
+  phone: string;
+  clientName: string;
+  message: string;
+  webUrl: string;
+  desktopUrl: string;
+};
+
+function buildWhatsAppReminder(phone: string, a: any): WhatsAppReminder | null {
+  const num = normalizePhone(phone);
+  if (!num) return null;
+  const start = new Date(a.starts_at);
+  const fecha = start.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+  const hora = start.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+  const nombre = a.client?.full_name ?? "";
+  const servicio = a.service?.name ? ` para tu ${a.service.name}` : "";
+  const msg =
+    `Hola ${nombre} 👋, te recordamos tu cita${servicio} el ${fecha} a las ${hora}. ` +
+    `Por favor confírmanos tu asistencia. ¡Gracias!`;
+  const encoded = encodeURIComponent(msg);
+  return {
+    phone: num,
+    clientName: nombre || "Paciente",
+    message: msg,
+    webUrl: `https://web.whatsapp.com/send/?phone=${num}&text=${encoded}&app_absent=0`,
+    desktopUrl: `whatsapp://send?phone=${num}&text=${encoded}`,
+  };
+}
+
+type Client = { id: string; full_name: string };
+
+const WA_WINDOW_NAME = "eleva_whatsapp_web";
+let waWindow: Window | null = null;
+type Service = { id: string; name: string; duration_min: number; color: string };
+
+function WhatsAppReminderModal({ reminder, onClose }: { reminder: WhatsAppReminder; onClose: () => void }) {
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(reminder.message);
+      toast.success("Recordatorio copiado");
+    } catch {
+      toast.error("No se pudo copiar el mensaje");
+    }
+  }
+
+  function openWhatsAppDesktop() {
+    // Copy first so the user has the message even if the OS handler is slow.
+    void copyMessage();
+
+    // Strategy 1: hidden iframe — the browser hands the custom protocol to the
+    // OS without navigating the current page. Works in most browsers even
+    // inside an iframe preview (Chrome, Edge, Brave).
+    const frame = document.createElement("iframe");
+    frame.style.display = "none";
+    frame.src = reminder.desktopUrl;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), 2000);
+
+    // Strategy 2: also trigger a top-level navigation via an anchor with
+    // target="_top" as a fallback for browsers that ignore iframe src for
+    // custom schemes (Safari/Firefox). Using _top escapes the preview iframe.
+    try {
+      const a = document.createElement("a");
+      a.href = reminder.desktopUrl;
+      a.target = "_top";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      /* ignore */
+    }
+
+    setTimeout(onClose, 600);
+  }
+
+  function openWhatsAppWeb() {
+    // Reuse a single tab for every message: keep the handle around and only
+    // change its location instead of opening a new window each time.
+    let win = waWindow && !waWindow.closed ? waWindow : null;
+
+    if (win) {
+      try {
+        win.location.href = reminder.webUrl;
+        win.focus();
+      } catch {
+        win = null;
+      }
+    }
+
+    if (!win) {
+      // The window name keeps the same tab even after a full page reload.
+      win = window.open(reminder.webUrl, WA_WINDOW_NAME);
+      if (win) {
+        waWindow = win;
+        win.focus();
+      } else {
+        const a = document.createElement("a");
+        a.href = reminder.webUrl;
+        a.target = WA_WINDOW_NAME;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    }
+
+    setTimeout(() => void copyMessage(), 150);
+    setTimeout(onClose, 400);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl bg-card p-6 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-serif text-xl">Recordatorio WhatsApp</h3>
+            <p className="text-sm text-muted-foreground">{reminder.clientName} · +{reminder.phone}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1" aria-label="Cerrar recordatorio"><X className="h-4 w-4" /></button>
+        </div>
+
+        <textarea
+          readOnly
+          value={reminder.message}
+          rows={5}
+          className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm"
+        />
+
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={openWhatsAppWeb}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] px-3 py-2.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            <MessageCircle className="h-4 w-4" /> Abrir en WhatsApp Web
+          </button>
+          <button
+            type="button"
+            onClick={openWhatsAppDesktop}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"
+          >
+            <MessageCircle className="h-4 w-4" /> Abrir en WhatsApp Desktop (app nativa)
+          </button>
+          <button
+            type="button"
+            onClick={copyMessage}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"
+          >
+            <Copy className="h-4 w-4" /> Copiar mensaje
+          </button>
+        </div>
+
+        <p className="text-xs text-muted-foreground text-center">
+          "Web" reutiliza siempre la misma pestaña de WhatsApp Web. "Desktop" solo funciona si tienes instalada la app nativa de WhatsApp (Microsoft Store / Meta), no la versión web. El mensaje se copia automáticamente como respaldo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function NewApptModal({
+  day, clients, services, treatments, canTreatments, currency, onClose, onCreate,
+}: {
+  day: Date;
+  clients: Client[];
+  services: Service[];
+  treatments: TreatmentSummary[];
+  canTreatments: boolean;
+  currency: string;
+  onClose: () => void;
+  onCreate: (
+    payload: {
+      client_id: string;
+      service_id: string | null;
+      treatment_id: string | null;
+      starts_at: string;
+      ends_at: string;
+      notes: string | null;
+    },
+    newClient?: ClientPayload,
+    newTreatment?: { total_cents: number; sessions_total: number },
+  ) => void;
+}) {
+  const [clientId, setClientId] = useState("");
+  const [newClient, setNewClient] = useState<ClientPayload | null>(null);
+  const [clientForm, setClientForm] = useState(false);
+  const [serviceId, setServiceId] = useState("");
+  const [treatmentId, setTreatmentId] = useState("");
+  const [total, setTotal] = useState("");
+  const [sessions, setSessions] = useState("");
+  const [time, setTime] = useState(() => {
+    const h = day.getHours() || 10;
+    return `${String(h).padStart(2, "0")}:${String(day.getMinutes()).padStart(2, "0")}`;
+  });
+  const [endTime, setEndTime] = useState(() => {
+    const d = new Date(day);
+    if (!d.getHours()) d.setHours(10, 0, 0, 0);
+    d.setMinutes(d.getMinutes() + 60);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
+  const [notes, setNotes] = useState("");
+
+  const openForClient = treatments.filter((t) => t.client_id === clientId && t.status === "open");
+  const selected = openForClient.find((t) => t.id === treatmentId) ?? null;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const [hh, mm] = time.split(":").map(Number);
+    const starts = new Date(day); starts.setHours(hh, mm, 0, 0);
+    const [eh, em] = endTime.split(":").map(Number);
+    const ends = new Date(day); ends.setHours(eh, em, 0, 0);
+    if (ends.getTime() <= starts.getTime()) ends.setTime(starts.getTime() + 60 * 60_000);
+    const totalCents = Math.round((Number(total) || 0) * 100);
+    const sessionsTotal = Math.max(0, Math.round(Number(sessions) || 0));
+    const wantsNew = canTreatments && !treatmentId && totalCents > 0 && sessionsTotal > 0;
+    onCreate(
+      {
+        client_id: clientId,
+        service_id: serviceId || null,
+        treatment_id: treatmentId || null,
+        starts_at: starts.toISOString(),
+        ends_at: ends.toISOString(),
+        notes: notes || null,
+      },
+      newClient ?? undefined,
+      wantsNew ? { total_cents: totalCents, sessions_total: sessionsTotal } : undefined,
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <form onSubmit={submit} className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-card p-6">
+        <div className="flex items-center justify-between pb-4">
+          <h3 className="font-serif text-xl">Nueva cita</h3>
+          <button type="button" onClick={onClose} className="p-1"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="grid flex-1 gap-4 overflow-y-auto pr-1 md:grid-cols-2">
+
+
+        <div>
+          <label className="text-xs text-muted-foreground">Cliente existente</label>
+          <select value={clientId} onChange={(e) => { setClientId(e.target.value); setNewClient(null); }} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <option value="">— Ninguno —</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">…o crear cliente nuevo</label>
+          {newClient ? (
+            <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm">
+              <span className="truncate">
+                {newClient.full_name}
+                {newClient.whatsapp ? ` · ${newClient.whatsapp}` : ""}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button type="button" className="text-xs underline" onClick={() => setClientForm(true)}>Editar</button>
+                <button type="button" className="text-xs underline text-destructive" onClick={() => setNewClient(null)}>Quitar</button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setClientForm(true)}
+              className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-input px-3 py-2 text-sm hover:bg-secondary"
+            >
+              <Plus className="h-4 w-4" /> Nuevo cliente (formulario completo)
+            </button>
+          )}
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Servicio</label>
+          <select value={serviceId} onChange={(e) => setServiceId(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
+            <option value="">— Sin servicio —</option>
+            {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+
+        {canTreatments && (
+          <div className="rounded-xl border border-border p-3 space-y-3 md:col-span-2">
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Tratamiento</span>
+              <span className="rounded-full bg-primary/10 text-primary text-[10px] px-2 py-0.5 font-semibold">PRO</span>
+            </div>
+
+            {openForClient.length > 0 && (
+              <div>
+                <label className="text-xs text-muted-foreground">Tratamiento en curso del cliente</label>
+                <select
+                  value={treatmentId}
+                  onChange={(e) => setTreatmentId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">— Crear uno nuevo —</option>
+                  {openForClient.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.service_name} · saldo {formatMoney(t.balance_cents, currency)} · {t.sessions_remaining} sesiones
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {selected ? (
+              <div className="rounded-lg bg-secondary p-3 text-xs grid grid-cols-3 gap-2">
+                <div>
+                  Saldo que debe
+                  <div className={`font-medium ${selected.balance_cents > 0 ? "text-destructive" : "text-emerald-600"}`}>
+                    {formatMoney(selected.balance_cents, currency)}
+                  </div>
+                </div>
+                <div>
+                  Sesiones restantes
+                  <div className="font-medium text-foreground">
+                    {selected.sessions_remaining} de {selected.sessions_total}
+                  </div>
+                </div>
+                <div>
+                  Estado
+                  <div className="font-medium text-foreground">{selected.settled ? "A paz y salvo" : "Con saldo"}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Valor total del tratamiento</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={total}
+                    onChange={(e) => setTotal(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Sesiones a pagar</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={sessions}
+                    onChange={(e) => setSessions(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+                <p className="col-span-2 text-[11px] text-muted-foreground">
+                  Los abonos registrados en Pagos descuentan el saldo y las sesiones de este tratamiento.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 md:col-span-2">
+          <div>
+            <label className="text-xs text-muted-foreground">Hora de inicio</label>
+            <input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Hora final</label>
+            <input type="time" step={900} value={endTime} onChange={(e) => setEndTime(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-xs text-muted-foreground">Notas</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+        </div>
+        </div>
+        <div className="mt-4 flex gap-2 justify-end border-t border-border pt-4">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border">Cancelar</button>
+          <button
+            type="submit"
+            disabled={!clientId && !newClient}
+            className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground disabled:opacity-60"
+          >
+            Crear cita
+          </button>
+        </div>
+
+      </form>
+
+      {clientForm && (
+        <Modal title="Nuevo cliente" onClose={() => setClientForm(false)} wide>
+          <ClientForm
+            client={newClient}
+            submitLabel="Usar este cliente"
+            onCancel={() => setClientForm(false)}
+            onSave={(payload) => {
+              setNewClient(payload);
+              setClientId("");
+              setClientForm(false);
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
