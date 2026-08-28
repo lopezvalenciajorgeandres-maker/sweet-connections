@@ -310,9 +310,10 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
     preselected
       ? (preselected.balance_cents / 100).toString()
       : preselectedTreatment
-        ? (preselectedTreatment.session_price_cents / 100).toString()
+        ? (preselectedTreatment.balance_cents / 100).toString()
         : "",
   );
+
   const [total, setTotal] = useState(preselected ? (preselected.total_cents / 100).toString() : "");
   const [method, setMethod] = useState<string>(PAYMENT_METHODS[0]);
   const [status, setStatus] = useState<string>(PAYMENT_STATUS[0]);
