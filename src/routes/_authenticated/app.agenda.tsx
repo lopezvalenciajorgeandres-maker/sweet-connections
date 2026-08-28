@@ -688,15 +688,23 @@ function EditTimeModal({
   const [end, setEnd] = useState(toTimeInput(e0));
   const [serviceId, setServiceId] = useState<string>(appt.service_id ?? "");
 
-  const treatment = appt.treatment_id
+  const linked = appt.treatment_id
     ? treatments.find((t) => t.id === appt.treatment_id) ?? null
     : null;
+  const fallback =
+    !linked && appt.client_id
+      ? treatments.find((t) => t.client_id === appt.client_id && t.status === "open") ?? null
+      : null;
+  const treatment = linked ?? fallback;
   const [treatTotal, setTreatTotal] = useState(() =>
-    treatment ? String(treatment.total_cents / 100) : "",
+    linked ? String(linked.total_cents / 100) : "",
   );
   const [treatSessions, setTreatSessions] = useState(() =>
-    treatment ? String(treatment.sessions_total) : "",
+    linked ? String(linked.sessions_total) : "",
   );
+  const currentService = services.find((x) => x.id === serviceId) ?? null;
+  const servicePriceCents = currentService?.price_cents ?? appt.price_cents ?? appt.service?.price_cents ?? null;
+
 
   function onServiceChange(id: string) {
     setServiceId(id);
@@ -723,17 +731,18 @@ function EditTimeModal({
             return;
           }
           const svc = services.find((x) => x.id === serviceId);
-          if (treatment) {
+          if (linked) {
             const newTotalCents = Math.round((Number(treatTotal) || 0) * 100);
             const newSessions = Math.max(1, Math.round(Number(treatSessions) || 1));
-            if (newTotalCents !== treatment.total_cents || newSessions !== treatment.sessions_total) {
+            if (newTotalCents !== linked.total_cents || newSessions !== linked.sessions_total) {
               onUpdateTreatment({
-                id: treatment.id,
-                total_cents: newTotalCents !== treatment.total_cents ? newTotalCents : undefined,
-                sessions_total: newSessions !== treatment.sessions_total ? newSessions : undefined,
+                id: linked.id,
+                total_cents: newTotalCents !== linked.total_cents ? newTotalCents : undefined,
+                sessions_total: newSessions !== linked.sessions_total ? newSessions : undefined,
               });
             }
           }
+
           onSave({
             starts_at: starts.toISOString(),
             ends_at: ends.toISOString(),
@@ -746,10 +755,18 @@ function EditTimeModal({
           {appt.client?.full_name ?? "Cliente"}
           {appt.service?.name ? ` · ${appt.service.name}` : ""}
         </p>
+        <div className="rounded-xl border border-border bg-secondary/50 p-3 text-sm flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor del servicio</span>
+          <span className="font-medium">
+            {servicePriceCents != null ? formatMoney(servicePriceCents, currency) : "—"}
+          </span>
+        </div>
         {treatment && (
           <div className="rounded-xl border border-border bg-card p-4 space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Tratamiento</h3>
+              <h3 className="text-sm font-semibold">
+                Tratamiento{treatment.service_name ? ` · ${treatment.service_name}` : ""}
+              </h3>
               {treatment.settled ? (
                 <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600">
                   A paz y salvo
@@ -764,54 +781,74 @@ function EditTimeModal({
                 </span>
               )}
             </div>
+            {!linked && (
+              <p className="text-[11px] text-muted-foreground">
+                Tratamiento en curso de este cliente (esta cita no está vinculada a él).
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
                 <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor total</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={treatTotal}
-                  onChange={(e) => setTreatTotal(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
-                />
+                {linked ? (
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={treatTotal}
+                    onChange={(e) => setTreatTotal(e.target.value)}
+                    className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                  />
+                ) : (
+                  <div className="font-medium">{formatMoney(treatment.total_cents, currency)}</div>
+                )}
               </div>
               <div>
                 <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones programadas</label>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={treatSessions}
-                  onChange={(e) => setTreatSessions(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
-                />
+                {linked ? (
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={treatSessions}
+                    onChange={(e) => setTreatSessions(e.target.value)}
+                    className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                  />
+                ) : (
+                  <div className="font-medium">{treatment.sessions_total}</div>
+                )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones realizadas</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones agendadas</div>
                 <div className="font-medium">{treatment.sessions_done}</div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones restantes</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones pendientes</div>
                 <div className="font-medium">
                   {Math.max(
                     0,
-                    (Number(treatSessions) || treatment.sessions_total) - treatment.sessions_done,
+                    (linked ? Number(treatSessions) || treatment.sessions_total : treatment.sessions_total) -
+                      treatment.sessions_done,
                   )}
                 </div>
               </div>
-
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Abonado</div>
-                <div className="font-medium">{formatMoney(treatment.paid_cents, currency)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor por sesión</div>
+                <div className="font-medium">{formatMoney(treatment.session_price_cents, currency)}</div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Saldo pendiente</div>
-                <div className="font-medium text-amber-600">{formatMoney(treatment.balance_cents, currency)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Abonos</div>
+                <div className="font-medium text-emerald-600">{formatMoney(treatment.paid_cents, currency)}</div>
+              </div>
+              <div className="col-span-2 border-t border-border pt-2 flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Saldo pendiente por pagar</div>
+                <div className={`font-semibold ${treatment.balance_cents > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                  {formatMoney(treatment.balance_cents, currency)}
+                </div>
               </div>
             </div>
           </div>
         )}
+
         <div>
           <label className="text-xs text-muted-foreground">Fecha</label>
           <input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
@@ -1108,7 +1145,17 @@ function NewApptModal({
 
         <div>
           <label className="text-xs text-muted-foreground">Cliente existente</label>
-          <select value={clientId} onChange={(e) => { setClientId(e.target.value); setNewClient(null); }} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
+          <select
+            value={clientId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setClientId(id);
+              setNewClient(null);
+              const open = treatments.find((t) => t.client_id === id && t.status === "open");
+              setTreatmentId(open ? open.id : "");
+            }}
+            className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+          >
             <option value="">— Ninguno —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}
           </select>
@@ -1171,25 +1218,50 @@ function NewApptModal({
             )}
 
             {selected ? (
-              <div className="rounded-lg bg-secondary p-3 text-xs grid grid-cols-3 gap-2">
-                <div>
-                  Saldo que debe
-                  <div className={`font-medium ${selected.balance_cents > 0 ? "text-destructive" : "text-emerald-600"}`}>
+              <div className="rounded-lg bg-secondary p-3 text-xs space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    Valor del servicio
+                    <div className="font-medium text-foreground">{formatMoney(selected.total_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Valor por sesión
+                    <div className="font-medium text-foreground">{formatMoney(selected.session_price_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Abonos
+                    <div className="font-medium text-emerald-600">{formatMoney(selected.paid_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Sesiones agendadas
+                    <div className="font-medium text-foreground">
+                      {selected.sessions_done} de {selected.sessions_total}
+                    </div>
+                  </div>
+                  <div>
+                    Sesiones pendientes
+                    <div className="font-medium text-foreground">
+                      {Math.max(0, selected.sessions_total - selected.sessions_done)}
+                      {" → "}
+                      <span className="text-primary">
+                        {Math.max(0, selected.sessions_total - selected.sessions_done - 1)} tras esta cita
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    Estado
+                    <div className="font-medium text-foreground">{selected.settled ? "A paz y salvo" : "Con saldo"}</div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between border-t border-border pt-2">
+                  <span>Saldo pendiente por pagar</span>
+                  <span className={`font-semibold ${selected.balance_cents > 0 ? "text-destructive" : "text-emerald-600"}`}>
                     {formatMoney(selected.balance_cents, currency)}
-                  </div>
-                </div>
-                <div>
-                  Sesiones restantes
-                  <div className="font-medium text-foreground">
-                    {selected.sessions_remaining} de {selected.sessions_total}
-                  </div>
-                </div>
-                <div>
-                  Estado
-                  <div className="font-medium text-foreground">{selected.settled ? "A paz y salvo" : "Con saldo"}</div>
+                  </span>
                 </div>
               </div>
             ) : (
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Valor total del tratamiento</label>
