@@ -110,6 +110,37 @@ function Agenda() {
     queryFn: () => getTreatments(),
     
   });
+  const getSchedule = useServerFn(listHours);
+  const addBlock = useServerFn(createBlock);
+  const removeBlock = useServerFn(deleteBlock);
+  const schedule = useQuery({ queryKey: ["schedule"], queryFn: () => getSchedule() });
+  const blocks = (schedule.data?.blocks ?? []) as Array<{
+    id: string;
+    starts_at: string;
+    ends_at: string;
+    reason: string | null;
+    kind: string;
+  }>;
+
+  const blockMut = useMutation({
+    mutationFn: (v: { starts_at: string; ends_at: string; reason?: string | null; kind?: string }) =>
+      addBlock({ data: { kind: "bloqueo", ...v } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["schedule"] });
+      toast.success("Horario bloqueado — ya no aparece disponible en el enlace de reservas");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo bloquear"),
+  });
+
+  const unblockMut = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => removeBlock({ data: { id } }))),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["schedule"] });
+      toast.success("Bloqueo liberado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo liberar el bloqueo"),
+  });
+
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
