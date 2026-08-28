@@ -338,10 +338,12 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
       : null;
 
   const alreadyPaid = summary?.paid ?? 0;
-  const pendingAfter = summary
-    ? Math.max(0, summary.balance - abonoCents)
-    : Math.max(0, Math.round((Number(total) || 0) * 100) - alreadyPaid - abonoCents);
-  const due = pendingAfter;
+  // Saldo real pendiente ANTES de registrar este abono.
+  const due = summary
+    ? summary.balance
+    : Math.max(0, Math.round((Number(total) || 0) * 100) - alreadyPaid);
+  const pendingAfter = Math.max(0, due - abonoCents);
+
 
   const options = useMemo(() => {
     const pendingFirst = [...receivables].sort((a, b) => Number(b.balance_cents > 0) - Number(a.balance_cents > 0));
