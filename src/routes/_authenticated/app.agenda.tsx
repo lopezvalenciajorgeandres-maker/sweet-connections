@@ -138,6 +138,16 @@ function Agenda() {
     onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
   });
 
+  const closeTreatMut = useMutation({
+    mutationFn: (v: { id: string; reopen?: boolean }) => closeTreat({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["treatments"] });
+      qc.invalidateQueries({ queryKey: ["receivables"] });
+      toast.success(v.reopen ? "Tratamiento reabierto" : "Tratamiento finalizado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
+  });
+
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
