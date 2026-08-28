@@ -142,6 +142,24 @@ function Agenda() {
   });
 
 
+  const pendingOnline = useMemo(
+    () =>
+      [...(appts.data ?? [])]
+        .filter((a: any) => a.status === "pending")
+        .sort((a: any, b: any) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()),
+    [appts.data],
+  );
+
+  const statusMut = useMutation({
+    mutationFn: (v: { id: string; status: "scheduled" | "cancelled" }) => update({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      toast.success(v.status === "scheduled" ? "Reserva confirmada" : "Reserva rechazada — horario liberado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar la reserva"),
+  });
+
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
     onSuccess: () => {
@@ -520,6 +538,57 @@ function Agenda() {
           <span className="text-xs text-muted-foreground">Configura tu negocio en Ajustes para generar el enlace.</span>
         )}
       </div>
+
+      {pendingOnline.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-sky-500/40 bg-sky-500/5 p-4">
+          <h2 className="font-serif text-xl">Reservas online por confirmar ({pendingOnline.length})</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Estas citas llegaron desde tu enlace de reservas. Confírmalas o recházalas; el horario se libera al rechazar.
+          </p>
+          <div className="mt-3 space-y-2">
+            {pendingOnline.map((a: any) => {
+              const start = new Date(a.starts_at);
+              const phone = (a.client?.whatsapp || a.client?.phone) as string | undefined;
+              return (
+                <div
+                  key={a.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{a.client?.full_name ?? "Cliente"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {start.toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" })} ·{" "}
+                      {start.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
+                      {a.service?.name ? ` · ${a.service.name}` : ""}
+                      {phone ? ` · ${phone}` : ""}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => statusMut.mutate({ id: a.id, status: "scheduled" })}
+                      disabled={statusMut.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      <Check className="h-3.5 w-3.5" /> Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => statusMut.mutate({ id: a.id, status: "cancelled" })}
+                      disabled={statusMut.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+                    >
+                      <X className="h-3.5 w-3.5" /> Rechazar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+
 
 
       <div className="mt-6 rounded-2xl overflow-x-auto border border-[#2a2320] bg-[#1a1512] text-neutral-100 shadow-lg">
