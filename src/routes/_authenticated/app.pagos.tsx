@@ -310,9 +310,10 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
     preselected
       ? (preselected.balance_cents / 100).toString()
       : preselectedTreatment
-        ? (preselectedTreatment.session_price_cents / 100).toString()
+        ? (preselectedTreatment.balance_cents / 100).toString()
         : "",
   );
+
   const [total, setTotal] = useState(preselected ? (preselected.total_cents / 100).toString() : "");
   const [method, setMethod] = useState<string>(PAYMENT_METHODS[0]);
   const [status, setStatus] = useState<string>(PAYMENT_STATUS[0]);
@@ -338,10 +339,12 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
       : null;
 
   const alreadyPaid = summary?.paid ?? 0;
-  const pendingAfter = summary
-    ? Math.max(0, summary.balance - abonoCents)
-    : Math.max(0, Math.round((Number(total) || 0) * 100) - alreadyPaid - abonoCents);
-  const due = pendingAfter;
+  // Saldo real pendiente ANTES de registrar este abono.
+  const due = summary
+    ? summary.balance
+    : Math.max(0, Math.round((Number(total) || 0) * 100) - alreadyPaid);
+  const pendingAfter = Math.max(0, due - abonoCents);
+
 
   const options = useMemo(() => {
     const pendingFirst = [...receivables].sort((a, b) => Number(b.balance_cents > 0) - Number(a.balance_cents > 0));
@@ -359,10 +362,11 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
     if (t) {
       setTreatmentId(t.id);
       setTotal((t.total_cents / 100).toString());
-      setAmount((t.session_price_cents / 100).toString());
+      setAmount((t.balance_cents / 100).toString());
       setStatus("Parcial");
       return;
     }
+
     setTotal((r.total_cents / 100).toString());
     setAmount((r.balance_cents / 100).toString());
     if (r.paid_cents > 0 && r.balance_cents > 0) setStatus("Parcial");
@@ -396,7 +400,9 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
                 if (!t) return;
                 setClientId(t.client_id);
                 setServiceId(t.service_id ?? "");
-                if (!amount) setAmount((t.session_price_cents / 100).toString());
+                setTotal((t.total_cents / 100).toString());
+                setAmount((t.balance_cents / 100).toString());
+
               }}
             >
               <option value="">Sin tratamiento</option>
@@ -484,11 +490,15 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
           {(isPartial || summary) && (
             <Field
               label="Saldo pendiente por pagar"
-              hint={alreadyPaid > 0 ? `Ya abonado antes: ${formatMoney(alreadyPaid, currency)}` : undefined}
+              hint={[
+                alreadyPaid > 0 ? `Ya abonado antes: ${formatMoney(alreadyPaid, currency)}` : null,
+                abonoCents > 0 ? `Quedará: ${formatMoney(pendingAfter, currency)}` : null,
+              ].filter(Boolean).join(" · ") || undefined}
             >
               <input readOnly className={`${inputClass} bg-secondary`} value={formatMoney(due, currency)} />
             </Field>
           )}
+
           {isTransfer && (
             <Field label="Banco / entidad *">
               <select className={inputClass} value={bank} onChange={(e) => setBank(e.target.value)}>
