@@ -965,7 +965,7 @@ function EditTimeModal({
                 )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones agendadas</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones realizadas</div>
                 <div className="font-medium">{treatment.sessions_done}</div>
               </div>
               <div>
