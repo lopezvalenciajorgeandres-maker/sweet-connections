@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
 import { Modal } from "@/components/app/kit";
 import { BackupButtons } from "@/components/app/backup-buttons";
-import { createTreatment, listTreatments, updateTreatment, type TreatmentSummary } from "@/lib/treatments.functions";
+import { closeTreatment, createTreatment, listTreatments, updateTreatment, type TreatmentSummary } from "@/lib/treatments.functions";
 import { useTenant } from "@/lib/use-tenant";
 import { formatMoney } from "@/lib/plan";
 
@@ -88,6 +88,7 @@ function Agenda() {
   const createCli = useServerFn(createClient);
   const createTreat = useServerFn(createTreatment);
   const updateTreat = useServerFn(updateTreatment);
+  const closeTreat = useServerFn(closeTreatment);
   const getTreatments = useServerFn(listTreatments);
   const tenant = useTenant();
 
@@ -661,6 +662,8 @@ function Agenda() {
             setEditAppt(null);
           }}
           onUpdateTreatment={(v) => updateTreatMut.mutate(v)}
+          onCloseTreatment={(v) => closeTreatMut.mutate(v)}
+          closingTreatment={closeTreatMut.isPending}
         />
       )}
     </div>
