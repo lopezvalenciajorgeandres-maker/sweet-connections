@@ -104,3 +104,17 @@ export const deleteAppointment = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export const completeAppointmentSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i: unknown) => z.object({ id: z.string().uuid(), completed: z.boolean() }).parse(i))
+  .handler(async ({ data, context }) => {
+    const businessId = await requireBusinessId(context.supabase, context.userId);
+    const { error } = await context.supabase
+      .from("appointments")
+      .update({ status: data.completed ? "completed" : "scheduled" })
+      .eq("id", data.id)
+      .eq("business_id", businessId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
