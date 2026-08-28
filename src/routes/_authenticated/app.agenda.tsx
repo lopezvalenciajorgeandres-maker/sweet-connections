@@ -523,6 +523,26 @@ function Agenda() {
                         </div>
                       )}
                       <div className="absolute top-1 right-1 z-20 flex flex-col gap-1">
+                        {tr && a.status !== "cancelled" && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              completeApptMut.mutate({ id: a.id, completed: a.status !== "completed" });
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={`h-7 w-7 rounded-full shadow-md ring-2 ring-background transition ${
+                              a.status === "completed"
+                                ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                                : "bg-white/90 text-emerald-700 hover:bg-emerald-100"
+                            }`}
+                            aria-label={a.status === "completed" ? "Sesión realizada (deshacer)" : "Marcar sesión como realizada"}
+                            title={a.status === "completed" ? "Sesión realizada (deshacer)" : "Marcar sesión como realizada"}
+                          >
+                            {a.status === "completed" ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                          </Button>
+                        )}
                         {trReady && (
                           <Button
                             type="button"
