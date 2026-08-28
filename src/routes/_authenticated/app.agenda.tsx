@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { listClients, createClient } from "@/lib/clients.functions";
 import { listServices } from "@/lib/services.functions";
 import { createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
-import { ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
@@ -444,8 +444,17 @@ function Agenda() {
                   const color = (a as any).service?.color ?? "#CDB4DB";
                   const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
                   const waReminder = phone ? buildWhatsAppReminder(phone, a) : null;
+                  const tr =
+                    (a.treatment_id
+                      ? (treatments.data ?? []).find((t) => t.id === a.treatment_id)
+                      : (treatments.data ?? []).find(
+                          (t) => t.client_id === (a as any).client_id && t.status === "open",
+                        )) ?? null;
+                  const trPendingSessions = tr ? Math.max(0, tr.sessions_total - tr.sessions_done) : 0;
+                  const trReady = !!tr && tr.status === "open" && tr.balance_cents <= 0;
                   const dragging = drag?.id === a.id && drag.moved;
                   const previewTop = dragging ? ((drag!.minutes - HOURS[0] * 60) / 60) * SLOT_HEIGHT : top;
+
                   return (
                     <div
                       key={a.id}
@@ -489,7 +498,37 @@ function Agenda() {
                       </div>
                       <div className="font-semibold truncate">{(a as any).client?.full_name}</div>
                       <div className="opacity-80 line-clamp-2">{(a as any).service?.name ?? "Cita"}</div>
+                      {tr && (
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          <span className="rounded bg-foreground/10 px-1 py-[1px] text-[10px] font-medium">
+                            {tr.sessions_done}/{tr.sessions_total} ses · {trPendingSessions} pend
+                          </span>
+                          <span
+                            className={`rounded px-1 py-[1px] text-[10px] font-semibold ${tr.balance_cents > 0 ? "bg-amber-500 text-black" : "bg-emerald-500 text-white"}`}
+                            title="Saldo pendiente por pagar"
+                          >
+                            {tr.balance_cents > 0 ? formatMoney(tr.balance_cents, tenant.currency) : "Pagado"}
+                          </span>
+                        </div>
+                      )}
                       <div className="absolute top-1 right-1 z-20 flex flex-col gap-1">
+                        {trReady && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTreatMut.mutate({ id: tr!.id });
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className="h-7 w-7 rounded-full bg-emerald-500 text-white shadow-md ring-2 ring-background hover:bg-emerald-600"
+                            aria-label="Finalizar tratamiento"
+                            title="Tratamiento pagado — finalizar"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                          </Button>
+                        )}
+
                         <Button
                           type="button"
                           size="icon"
@@ -553,6 +592,13 @@ function Agenda() {
               const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
               const rem = phone ? buildWhatsAppReminder(phone, a) : null;
               const start = new Date(a.starts_at);
+              const tr =
+                (a.treatment_id
+                  ? (treatments.data ?? []).find((t) => t.id === a.treatment_id)
+                  : (treatments.data ?? []).find(
+                      (t) => t.client_id === (a as any).client_id && t.status === "open",
+                    )) ?? null;
+              const trPending = tr ? Math.max(0, tr.sessions_total - tr.sessions_done) : 0;
               return (
                 <div
                   key={a.id}
@@ -565,7 +611,31 @@ function Agenda() {
                       {start.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
                       {(a as any).service?.name ? ` · ${(a as any).service.name}` : ""}
                     </div>
+                    {tr && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="rounded-full bg-secondary px-2 py-0.5">
+                          {tr.sessions_done}/{tr.sessions_total} sesiones · {trPending} pendientes
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-semibold ${tr.balance_cents > 0 ? "bg-amber-500/20 text-amber-600" : "bg-emerald-500/20 text-emerald-600"}`}
+                        >
+                          {tr.balance_cents > 0
+                            ? `Saldo ${formatMoney(tr.balance_cents, tenant.currency)}`
+                            : "Todo pagado"}
+                        </span>
+                        {tr.status === "open" && tr.balance_cents <= 0 && (
+                          <button
+                            type="button"
+                            onClick={() => closeTreatMut.mutate({ id: tr.id })}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Finalizar tratamiento
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
+
                   {rem ? (
                     <div className="flex flex-wrap items-center gap-2">
                     <button
