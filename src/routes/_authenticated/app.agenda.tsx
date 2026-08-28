@@ -592,6 +592,13 @@ function Agenda() {
               const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
               const rem = phone ? buildWhatsAppReminder(phone, a) : null;
               const start = new Date(a.starts_at);
+              const tr =
+                (a.treatment_id
+                  ? (treatments.data ?? []).find((t) => t.id === a.treatment_id)
+                  : (treatments.data ?? []).find(
+                      (t) => t.client_id === (a as any).client_id && t.status === "open",
+                    )) ?? null;
+              const trPending = tr ? Math.max(0, tr.sessions_total - tr.sessions_done) : 0;
               return (
                 <div
                   key={a.id}
@@ -604,7 +611,31 @@ function Agenda() {
                       {start.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}
                       {(a as any).service?.name ? ` · ${(a as any).service.name}` : ""}
                     </div>
+                    {tr && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="rounded-full bg-secondary px-2 py-0.5">
+                          {tr.sessions_done}/{tr.sessions_total} sesiones · {trPending} pendientes
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-semibold ${tr.balance_cents > 0 ? "bg-amber-500/20 text-amber-600" : "bg-emerald-500/20 text-emerald-600"}`}
+                        >
+                          {tr.balance_cents > 0
+                            ? `Saldo ${formatMoney(tr.balance_cents, tenant.currency)}`
+                            : "Todo pagado"}
+                        </span>
+                        {tr.status === "open" && tr.balance_cents <= 0 && (
+                          <button
+                            type="button"
+                            onClick={() => closeTreatMut.mutate({ id: tr.id })}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Finalizar tratamiento
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
+
                   {rem ? (
                     <div className="flex flex-wrap items-center gap-2">
                     <button
