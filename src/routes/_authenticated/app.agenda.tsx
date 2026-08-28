@@ -150,6 +150,16 @@ function Agenda() {
     onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
   });
 
+  const completeApptMut = useMutation({
+    mutationFn: (v: { id: string; completed: boolean }) => completeAppt({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      qc.invalidateQueries({ queryKey: ["treatments"] });
+      toast.success(v.completed ? "Sesión marcada como realizada" : "Sesión marcada como no realizada");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar la sesión"),
+  });
+
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
