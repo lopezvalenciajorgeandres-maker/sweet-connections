@@ -498,7 +498,37 @@ function Agenda() {
                       </div>
                       <div className="font-semibold truncate">{(a as any).client?.full_name}</div>
                       <div className="opacity-80 line-clamp-2">{(a as any).service?.name ?? "Cita"}</div>
+                      {tr && (
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          <span className="rounded bg-foreground/10 px-1 py-[1px] text-[10px] font-medium">
+                            {tr.sessions_done}/{tr.sessions_total} ses · {trPendingSessions} pend
+                          </span>
+                          <span
+                            className={`rounded px-1 py-[1px] text-[10px] font-semibold ${tr.balance_cents > 0 ? "bg-amber-500 text-black" : "bg-emerald-500 text-white"}`}
+                            title="Saldo pendiente por pagar"
+                          >
+                            {tr.balance_cents > 0 ? formatMoney(tr.balance_cents, tenant.currency) : "Pagado"}
+                          </span>
+                        </div>
+                      )}
                       <div className="absolute top-1 right-1 z-20 flex flex-col gap-1">
+                        {trReady && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTreatMut.mutate({ id: tr!.id });
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className="h-7 w-7 rounded-full bg-emerald-500 text-white shadow-md ring-2 ring-background hover:bg-emerald-600"
+                            aria-label="Finalizar tratamiento"
+                            title="Tratamiento pagado — finalizar"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                          </Button>
+                        )}
+
                         <Button
                           type="button"
                           size="icon"
