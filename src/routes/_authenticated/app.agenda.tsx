@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
 import { Modal } from "@/components/app/kit";
 import { BackupButtons } from "@/components/app/backup-buttons";
-import { createTreatment, listTreatments, updateTreatment, type TreatmentSummary } from "@/lib/treatments.functions";
+import { closeTreatment, createTreatment, listTreatments, updateTreatment, type TreatmentSummary } from "@/lib/treatments.functions";
 import { useTenant } from "@/lib/use-tenant";
 import { formatMoney } from "@/lib/plan";
 
@@ -88,6 +88,7 @@ function Agenda() {
   const createCli = useServerFn(createClient);
   const createTreat = useServerFn(createTreatment);
   const updateTreat = useServerFn(updateTreatment);
+  const closeTreat = useServerFn(closeTreatment);
   const getTreatments = useServerFn(listTreatments);
   const tenant = useTenant();
 
@@ -134,6 +135,16 @@ function Agenda() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["treatments"] });
       toast.success("Tratamiento actualizado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
+  });
+
+  const closeTreatMut = useMutation({
+    mutationFn: (v: { id: string; reopen?: boolean }) => closeTreat({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["treatments"] });
+      qc.invalidateQueries({ queryKey: ["receivables"] });
+      toast.success(v.reopen ? "Tratamiento reabierto" : "Tratamiento finalizado");
     },
     onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
   });
@@ -651,6 +662,8 @@ function Agenda() {
             setEditAppt(null);
           }}
           onUpdateTreatment={(v) => updateTreatMut.mutate(v)}
+          onCloseTreatment={(v) => closeTreatMut.mutate(v)}
+          closingTreatment={closeTreatMut.isPending}
         />
       )}
     </div>
@@ -672,6 +685,8 @@ function EditTimeModal({
   onClose,
   onSave,
   onUpdateTreatment,
+  onCloseTreatment,
+  closingTreatment,
 }: {
   appt: any;
   services: any[];
@@ -680,6 +695,8 @@ function EditTimeModal({
   onClose: () => void;
   onSave: (v: { starts_at: string; ends_at: string; service_id: string | null; price_cents: number | null }) => void;
   onUpdateTreatment: (v: { id: string; total_cents?: number; sessions_total?: number }) => void;
+  onCloseTreatment: (v: { id: string; reopen?: boolean }) => void;
+  closingTreatment?: boolean;
 }) {
   const s = new Date(appt.starts_at);
   const e0 = new Date(appt.ends_at);
@@ -702,6 +719,33 @@ function EditTimeModal({
   const [treatSessions, setTreatSessions] = useState(() =>
     linked ? String(linked.sessions_total) : "",
   );
+  const sessionsPendingNow = treatment
+    ? Math.max(
+        0,
+        (linked ? Number(treatSessions) || treatment.sessions_total : treatment.sessions_total) -
+          treatment.sessions_done,
+      )
+    : 0;
+  const state = !treatment
+    ? { label: "", pill: "", panel: "border-border bg-card" }
+    : treatment.status === "closed"
+      ? {
+          label: "Finalizado",
+          pill: "bg-muted text-muted-foreground",
+          panel: "border-border bg-muted/40 opacity-90",
+        }
+      : treatment.settled && sessionsPendingNow === 0
+        ? {
+            label: "Listo para finalizar",
+            pill: "bg-emerald-500/15 text-emerald-600",
+            panel: "border-emerald-500/40 bg-emerald-500/5",
+          }
+        : {
+            label: "En curso",
+            pill: "bg-amber-500/15 text-amber-600",
+            panel: "border-amber-500/40 bg-amber-500/5",
+          };
+
   const currentService = services.find((x) => x.id === serviceId) ?? null;
   const servicePriceCents = currentService?.price_cents ?? appt.price_cents ?? appt.service?.price_cents ?? null;
 
@@ -762,24 +806,12 @@ function EditTimeModal({
           </span>
         </div>
         {treatment && (
-          <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className={`rounded-xl border p-4 space-y-2 ${state.panel}`}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">
                 Tratamiento{treatment.service_name ? ` · ${treatment.service_name}` : ""}
               </h3>
-              {treatment.settled ? (
-                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600">
-                  A paz y salvo
-                </span>
-              ) : treatment.status === "closed" ? (
-                <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  Cerrado
-                </span>
-              ) : (
-                <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-600">
-                  En curso
-                </span>
-              )}
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${state.pill}`}>{state.label}</span>
             </div>
             {!linked && (
               <p className="text-[11px] text-muted-foreground">
@@ -823,13 +855,7 @@ function EditTimeModal({
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones pendientes</div>
-                <div className="font-medium">
-                  {Math.max(
-                    0,
-                    (linked ? Number(treatSessions) || treatment.sessions_total : treatment.sessions_total) -
-                      treatment.sessions_done,
-                  )}
-                </div>
+                <div className="font-medium">{sessionsPendingNow}</div>
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor por sesión</div>
@@ -846,6 +872,42 @@ function EditTimeModal({
                 </div>
               </div>
             </div>
+            {treatment.status === "closed" ? (
+              <button
+                type="button"
+                disabled={closingTreatment}
+                onClick={() => onCloseTreatment({ id: treatment.id, reopen: true })}
+                className="mt-1 w-full rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary transition disabled:opacity-60"
+              >
+                Reabrir tratamiento
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={closingTreatment}
+                onClick={() => {
+                  if (treatment.balance_cents > 0 || sessionsPendingNow > 0) {
+                    const msg = [
+                      treatment.balance_cents > 0
+                        ? `saldo pendiente de ${formatMoney(treatment.balance_cents, currency)}`
+                        : null,
+                      sessionsPendingNow > 0 ? `${sessionsPendingNow} sesión(es) sin agendar` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" y ");
+                    if (!window.confirm(`Este tratamiento tiene ${msg}. ¿Finalizarlo de todas formas?`)) return;
+                  }
+                  onCloseTreatment({ id: treatment.id });
+                }}
+                className={`mt-1 w-full rounded-full px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60 ${
+                  treatment.settled && sessionsPendingNow === 0
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-amber-600 hover:bg-amber-700"
+                }`}
+              >
+                {closingTreatment ? "Finalizando…" : "Finalizar tratamiento"}
+              </button>
+            )}
           </div>
         )}
 
