@@ -688,15 +688,23 @@ function EditTimeModal({
   const [end, setEnd] = useState(toTimeInput(e0));
   const [serviceId, setServiceId] = useState<string>(appt.service_id ?? "");
 
-  const treatment = appt.treatment_id
+  const linked = appt.treatment_id
     ? treatments.find((t) => t.id === appt.treatment_id) ?? null
     : null;
+  const fallback =
+    !linked && appt.client_id
+      ? treatments.find((t) => t.client_id === appt.client_id && t.status === "open") ?? null
+      : null;
+  const treatment = linked ?? fallback;
   const [treatTotal, setTreatTotal] = useState(() =>
-    treatment ? String(treatment.total_cents / 100) : "",
+    linked ? String(linked.total_cents / 100) : "",
   );
   const [treatSessions, setTreatSessions] = useState(() =>
-    treatment ? String(treatment.sessions_total) : "",
+    linked ? String(linked.sessions_total) : "",
   );
+  const currentService = services.find((x) => x.id === serviceId) ?? null;
+  const servicePriceCents = currentService?.price_cents ?? appt.price_cents ?? appt.service?.price_cents ?? null;
+
 
   function onServiceChange(id: string) {
     setServiceId(id);
