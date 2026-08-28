@@ -1412,16 +1412,16 @@ function NewApptModal({
                   <div>
                     Sesiones agendadas
                     <div className="font-medium text-foreground">
-                      {selected.sessions_done} de {selected.sessions_total}
+                      {selected.sessions_scheduled} de {selected.sessions_total}
                     </div>
                   </div>
                   <div>
                     Sesiones pendientes
                     <div className="font-medium text-foreground">
-                      {Math.max(0, selected.sessions_total - selected.sessions_done)}
+                      {Math.max(0, selected.sessions_total - selected.sessions_scheduled)}
                       {" → "}
                       <span className="text-primary">
-                        {Math.max(0, selected.sessions_total - selected.sessions_done - 1)} tras esta cita
+                        {Math.max(0, selected.sessions_total - selected.sessions_scheduled - 1)} tras esta cita
                       </span>
                     </div>
                   </div>
