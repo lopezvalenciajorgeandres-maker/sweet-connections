@@ -444,8 +444,17 @@ function Agenda() {
                   const color = (a as any).service?.color ?? "#CDB4DB";
                   const phone = ((a as any).client?.whatsapp || (a as any).client?.phone) as string | undefined;
                   const waReminder = phone ? buildWhatsAppReminder(phone, a) : null;
+                  const tr =
+                    (a.treatment_id
+                      ? (treatments.data ?? []).find((t) => t.id === a.treatment_id)
+                      : (treatments.data ?? []).find(
+                          (t) => t.client_id === (a as any).client_id && t.status === "open",
+                        )) ?? null;
+                  const trPendingSessions = tr ? Math.max(0, tr.sessions_total - tr.sessions_done) : 0;
+                  const trReady = !!tr && tr.status === "open" && tr.balance_cents <= 0;
                   const dragging = drag?.id === a.id && drag.moved;
                   const previewTop = dragging ? ((drag!.minutes - HOURS[0] * 60) / 60) * SLOT_HEIGHT : top;
+
                   return (
                     <div
                       key={a.id}
