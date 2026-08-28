@@ -362,10 +362,11 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
     if (t) {
       setTreatmentId(t.id);
       setTotal((t.total_cents / 100).toString());
-      setAmount((t.session_price_cents / 100).toString());
+      setAmount((t.balance_cents / 100).toString());
       setStatus("Parcial");
       return;
     }
+
     setTotal((r.total_cents / 100).toString());
     setAmount((r.balance_cents / 100).toString());
     if (r.paid_cents > 0 && r.balance_cents > 0) setStatus("Parcial");
