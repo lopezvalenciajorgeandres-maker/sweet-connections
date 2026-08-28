@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listClients, createClient } from "@/lib/clients.functions";
 import { listServices } from "@/lib/services.functions";
-import { createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
-import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { completeAppointmentSession, createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
@@ -89,6 +89,7 @@ function Agenda() {
   const createTreat = useServerFn(createTreatment);
   const updateTreat = useServerFn(updateTreatment);
   const closeTreat = useServerFn(closeTreatment);
+  const completeAppt = useServerFn(completeAppointmentSession);
   const getTreatments = useServerFn(listTreatments);
   const tenant = useTenant();
 
@@ -147,6 +148,16 @@ function Agenda() {
       toast.success(v.reopen ? "Tratamiento reabierto" : "Tratamiento finalizado");
     },
     onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar el tratamiento"),
+  });
+
+  const completeApptMut = useMutation({
+    mutationFn: (v: { id: string; completed: boolean }) => completeAppt({ data: v }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["appts"] });
+      qc.invalidateQueries({ queryKey: ["treatments"] });
+      toast.success(v.completed ? "Sesión marcada como realizada" : "Sesión marcada como no realizada");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo actualizar la sesión"),
   });
 
   const days = useMemo(
@@ -512,6 +523,26 @@ function Agenda() {
                         </div>
                       )}
                       <div className="absolute top-1 right-1 z-20 flex flex-col gap-1">
+                        {tr && a.status !== "cancelled" && (
+                          <Button
+                            type="button"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              completeApptMut.mutate({ id: a.id, completed: a.status !== "completed" });
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={`h-7 w-7 rounded-full shadow-md ring-2 ring-background transition ${
+                              a.status === "completed"
+                                ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                                : "bg-white/90 text-emerald-700 hover:bg-emerald-100"
+                            }`}
+                            aria-label={a.status === "completed" ? "Sesión realizada (deshacer)" : "Marcar sesión como realizada"}
+                            title={a.status === "completed" ? "Sesión realizada (deshacer)" : "Marcar sesión como realizada"}
+                          >
+                            {a.status === "completed" ? <CheckCircle2 className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                          </Button>
+                        )}
                         {trReady && (
                           <Button
                             type="button"
@@ -623,6 +654,20 @@ function Agenda() {
                             ? `Saldo ${formatMoney(tr.balance_cents, tenant.currency)}`
                             : "Todo pagado"}
                         </span>
+                        {a.status !== "cancelled" && (
+                          <button
+                            type="button"
+                            onClick={() => completeApptMut.mutate({ id: a.id, completed: a.status !== "completed" })}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+                              a.status === "completed"
+                                ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                                : "border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10"
+                            }`}
+                          >
+                            {a.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                            {a.status === "completed" ? "Sesión realizada" : "Marcar sesión realizada"}
+                          </button>
+                        )}
                         {tr.status === "open" && tr.balance_cents <= 0 && (
                           <button
                             type="button"
@@ -920,7 +965,7 @@ function EditTimeModal({
                 )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones agendadas</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones realizadas</div>
                 <div className="font-medium">{treatment.sessions_done}</div>
               </div>
               <div>
@@ -1367,16 +1412,16 @@ function NewApptModal({
                   <div>
                     Sesiones agendadas
                     <div className="font-medium text-foreground">
-                      {selected.sessions_done} de {selected.sessions_total}
+                      {selected.sessions_scheduled} de {selected.sessions_total}
                     </div>
                   </div>
                   <div>
                     Sesiones pendientes
                     <div className="font-medium text-foreground">
-                      {Math.max(0, selected.sessions_total - selected.sessions_done)}
+                      {Math.max(0, selected.sessions_total - selected.sessions_scheduled)}
                       {" → "}
                       <span className="text-primary">
-                        {Math.max(0, selected.sessions_total - selected.sessions_done - 1)} tras esta cita
+                        {Math.max(0, selected.sessions_total - selected.sessions_scheduled - 1)} tras esta cita
                       </span>
                     </div>
                   </div>
