@@ -89,6 +89,7 @@ function Agenda() {
   const createTreat = useServerFn(createTreatment);
   const updateTreat = useServerFn(updateTreatment);
   const closeTreat = useServerFn(closeTreatment);
+  const completeAppt = useServerFn(completeAppointmentSession);
   const getTreatments = useServerFn(listTreatments);
   const tenant = useTenant();
 
