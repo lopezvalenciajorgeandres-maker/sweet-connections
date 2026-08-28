@@ -69,11 +69,15 @@ function BookingPage() {
   const slots = useQuery({
     queryKey: ["slots", serviceId, professionalId, date],
     enabled: step === 1 && !!serviceId,
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
     queryFn: () =>
       availability({
         data: { business_id: data.business.id, service_id: serviceId, professional_id: professionalId || null, date },
       }),
   });
+
 
   const mutation = useMutation({
     mutationFn: () =>
