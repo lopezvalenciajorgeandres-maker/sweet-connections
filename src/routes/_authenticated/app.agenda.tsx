@@ -731,17 +731,18 @@ function EditTimeModal({
             return;
           }
           const svc = services.find((x) => x.id === serviceId);
-          if (treatment) {
+          if (linked) {
             const newTotalCents = Math.round((Number(treatTotal) || 0) * 100);
             const newSessions = Math.max(1, Math.round(Number(treatSessions) || 1));
-            if (newTotalCents !== treatment.total_cents || newSessions !== treatment.sessions_total) {
+            if (newTotalCents !== linked.total_cents || newSessions !== linked.sessions_total) {
               onUpdateTreatment({
-                id: treatment.id,
-                total_cents: newTotalCents !== treatment.total_cents ? newTotalCents : undefined,
-                sessions_total: newSessions !== treatment.sessions_total ? newSessions : undefined,
+                id: linked.id,
+                total_cents: newTotalCents !== linked.total_cents ? newTotalCents : undefined,
+                sessions_total: newSessions !== linked.sessions_total ? newSessions : undefined,
               });
             }
           }
+
           onSave({
             starts_at: starts.toISOString(),
             ends_at: ends.toISOString(),
