@@ -5,7 +5,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { listClients, createClient } from "@/lib/clients.functions";
 import { listServices } from "@/lib/services.functions";
 import { completeAppointmentSession, createAppointment, deleteAppointment, listAppointments, updateAppointment } from "@/lib/appointments.functions";
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Copy, Link2, Lock, LockOpen, MessageCircle, Plus, Trash2, X } from "lucide-react";
+import { createBlock, deleteBlock, listHours } from "@/lib/schedule.functions";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ClientForm, type ClientPayload } from "@/components/app/client-form";
@@ -109,6 +110,37 @@ function Agenda() {
     queryFn: () => getTreatments(),
     
   });
+  const getSchedule = useServerFn(listHours);
+  const addBlock = useServerFn(createBlock);
+  const removeBlock = useServerFn(deleteBlock);
+  const schedule = useQuery({ queryKey: ["schedule"], queryFn: () => getSchedule() });
+  const blocks = (schedule.data?.blocks ?? []) as Array<{
+    id: string;
+    starts_at: string;
+    ends_at: string;
+    reason: string | null;
+    kind: string;
+  }>;
+
+  const blockMut = useMutation({
+    mutationFn: (v: { starts_at: string; ends_at: string; reason?: string | null; kind?: string }) =>
+      addBlock({ data: { kind: "bloqueo", ...v } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["schedule"] });
+      toast.success("Horario bloqueado — ya no aparece disponible en el enlace de reservas");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo bloquear"),
+  });
+
+  const unblockMut = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => removeBlock({ data: { id } }))),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["schedule"] });
+      toast.success("Bloqueo liberado");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "No se pudo liberar el bloqueo"),
+  });
+
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
@@ -342,6 +374,69 @@ function Agenda() {
     setModal(true);
   }
 
+  function slotRange(d: Date, minutes: number, length = SLOT_MIN) {
+    const s = new Date(d);
+    s.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    const e = new Date(s.getTime() + length * 60000);
+    return { s, e };
+  }
+
+  function blocksOverlapping(startsAt: Date, endsAt: Date) {
+    return blocks.filter(
+      (b) => new Date(b.starts_at) < endsAt && new Date(b.ends_at) > startsAt,
+    );
+  }
+
+  function isSlotBlocked(d: Date, minutes: number) {
+    const { s, e } = slotRange(d, minutes);
+    return blocksOverlapping(s, e).length > 0;
+  }
+
+  function dayBlocks(d: Date) {
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    return blocksOverlapping(s, e);
+  }
+
+  function isDayFullyBlocked(d: Date) {
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    return blocks.some((b) => new Date(b.starts_at) <= s && new Date(b.ends_at) >= e);
+  }
+
+  function toggleSlotBlock(d: Date, minutes: number) {
+    const { s, e } = slotRange(d, minutes);
+    const existing = blocksOverlapping(s, e);
+    if (existing.length > 0) {
+      unblockMut.mutate(existing.map((b) => b.id));
+      return;
+    }
+    blockMut.mutate({ starts_at: s.toISOString(), ends_at: e.toISOString(), kind: "franja", reason: "Horario no disponible" });
+  }
+
+  function toggleDayBlock(d: Date) {
+    const existing = dayBlocks(d);
+    if (existing.length > 0) {
+      unblockMut.mutate(existing.map((b) => b.id));
+      return;
+    }
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    blockMut.mutate({ starts_at: s.toISOString(), ends_at: e.toISOString(), kind: "dia", reason: "Día no disponible" });
+  }
+
+  const bookingSlug = tenant.business?.slug ?? null;
+  const bookingUrl =
+    typeof window !== "undefined" && bookingSlug ? `${window.location.origin}/booking/${bookingSlug}` : "";
+
+
+
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -392,8 +487,40 @@ function Agenda() {
       </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Consejo: arrastra una cita y suéltala en otro día u hora para reagendarla automáticamente.
+        Consejo: arrastra una cita y suéltala en otro día u hora para reagendarla automáticamente. Usa el candado de cada
+        franja (o “Bloquear día”) para reservar espacios: lo que bloquees desaparece al instante del enlace de reservas.
       </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3">
+        <Link2 className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">Enlace de reservas para clientes</span>
+        {bookingUrl ? (
+          <>
+            <code className="truncate rounded bg-secondary px-2 py-1 text-xs">{bookingUrl}</code>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(bookingUrl);
+                toast.success("Enlace copiado");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+            >
+              <Copy className="h-3.5 w-3.5" /> Copiar
+            </button>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(`Hola! Puedes reservar tu cita aquí: ${bookingUrl}`)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#25D366] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+            >
+              <MessageCircle className="h-3.5 w-3.5" /> Enviar por WhatsApp
+            </a>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">Configura tu negocio en Ajustes para generar el enlace.</span>
+        )}
+      </div>
+
 
       <div className="mt-6 rounded-2xl overflow-x-auto border border-[#2a2320] bg-[#1a1512] text-neutral-100 shadow-lg">
         <div className="min-w-[820px]">
@@ -402,15 +529,30 @@ function Agenda() {
           <div className="border-b border-r border-white/5" />
           {days.map((d, i) => {
             const active = isSameDay(d, today);
+            const dayBlocked = isDayFullyBlocked(d);
             return (
               <div key={i} className="border-b border-white/5 py-3 text-center">
                 <div className="text-[11px] uppercase tracking-wider text-neutral-400">{DAY_NAMES[i]}</div>
                 <div className={`mt-1 mx-auto w-9 h-9 flex items-center justify-center rounded-full text-lg font-medium ${active ? "bg-primary text-primary-foreground" : "text-neutral-100"}`}>
                   {d.getDate()}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => toggleDayBlock(d)}
+                  className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                    dayBlocked
+                      ? "bg-rose-500 text-white hover:bg-rose-600"
+                      : "border border-white/15 text-neutral-300 hover:bg-white/10"
+                  }`}
+                  title={dayBlocked ? "Día bloqueado — toca para liberar" : "Bloquear día completo"}
+                >
+                  {dayBlocked ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                  {dayBlocked ? "Liberar día" : "Bloquear día"}
+                </button>
               </div>
             );
           })}
+
         </div>
 
         {/* Body grid */}
@@ -433,15 +575,49 @@ function Agenda() {
             const dayAppts = (appts.data ?? []).filter((a) => isSameDay(new Date(a.starts_at), d));
             return (
               <div key={di} className="relative border-r border-white/5 last:border-r-0">
-                {SLOTS.map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => openNewAt(d, m)}
-                    style={{ height: SLOT_PX }}
-                    aria-label={`Nueva cita ${fmtSlot(m)}`}
-                    className={`w-full block hover:bg-white/[0.06] transition border-b ${m % 60 === 0 ? "border-white/10" : "border-white/[0.04]"}`}
-                  />
-                ))}
+                {SLOTS.map((m) => {
+                  const blocked = isSlotBlocked(d, m);
+                  const taken = dayAppts.some((a) => {
+                    const s = new Date(a.starts_at);
+                    const e = new Date(a.ends_at);
+                    const sm = s.getHours() * 60 + s.getMinutes();
+                    const em = e.getHours() * 60 + e.getMinutes();
+                    return m < em && m + SLOT_MIN > sm;
+                  });
+                  return (
+                    <div key={m} style={{ height: SLOT_PX }} className="relative group/slot">
+                      <button
+                        onClick={() => (blocked ? toggleSlotBlock(d, m) : openNewAt(d, m))}
+                        style={{ height: SLOT_PX }}
+                        aria-label={blocked ? `Liberar franja ${fmtSlot(m)}` : `Nueva cita ${fmtSlot(m)}`}
+                        className={`w-full block transition border-b ${m % 60 === 0 ? "border-white/10" : "border-white/[0.04]"} ${
+                          blocked
+                            ? "bg-[repeating-linear-gradient(45deg,rgba(244,63,94,0.35)_0_6px,transparent_6px_12px)] hover:bg-rose-500/30"
+                            : "hover:bg-white/[0.06]"
+                        }`}
+                      />
+                      {!taken && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSlotBlock(d, m);
+                          }}
+                          className={`absolute right-0.5 top-0.5 z-10 rounded p-0.5 transition ${
+                            blocked
+                              ? "bg-rose-500 text-white opacity-100"
+                              : "bg-white/15 text-neutral-100 opacity-0 group-hover/slot:opacity-100"
+                          }`}
+                          aria-label={blocked ? `Liberar franja ${fmtSlot(m)}` : `Bloquear franja ${fmtSlot(m)}`}
+                          title={blocked ? "Franja bloqueada — toca para liberar" : "Bloquear esta franja"}
+                        >
+                          {blocked ? <LockOpen className="h-2.5 w-2.5" /> : <Lock className="h-2.5 w-2.5" />}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
                 {dayAppts.map((a) => {
                   const start = new Date(a.starts_at);
                   const end = new Date(a.ends_at);
