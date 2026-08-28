@@ -19,6 +19,7 @@ export type TreatmentSummary = {
   sessions_paid: number;
   sessions_remaining: number;
   sessions_done: number;
+  sessions_scheduled: number;
   settled: boolean;
   closed_at: string | null;
   created_at: string;
