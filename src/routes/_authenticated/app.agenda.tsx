@@ -374,6 +374,69 @@ function Agenda() {
     setModal(true);
   }
 
+  function slotRange(d: Date, minutes: number, length = SLOT_MIN) {
+    const s = new Date(d);
+    s.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    const e = new Date(s.getTime() + length * 60000);
+    return { s, e };
+  }
+
+  function blocksOverlapping(startsAt: Date, endsAt: Date) {
+    return blocks.filter(
+      (b) => new Date(b.starts_at) < endsAt && new Date(b.ends_at) > startsAt,
+    );
+  }
+
+  function isSlotBlocked(d: Date, minutes: number) {
+    const { s, e } = slotRange(d, minutes);
+    return blocksOverlapping(s, e).length > 0;
+  }
+
+  function dayBlocks(d: Date) {
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    return blocksOverlapping(s, e);
+  }
+
+  function isDayFullyBlocked(d: Date) {
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    return blocks.some((b) => new Date(b.starts_at) <= s && new Date(b.ends_at) >= e);
+  }
+
+  function toggleSlotBlock(d: Date, minutes: number) {
+    const { s, e } = slotRange(d, minutes);
+    const existing = blocksOverlapping(s, e);
+    if (existing.length > 0) {
+      unblockMut.mutate(existing.map((b) => b.id));
+      return;
+    }
+    blockMut.mutate({ starts_at: s.toISOString(), ends_at: e.toISOString(), kind: "franja", reason: "Horario no disponible" });
+  }
+
+  function toggleDayBlock(d: Date) {
+    const existing = dayBlocks(d);
+    if (existing.length > 0) {
+      unblockMut.mutate(existing.map((b) => b.id));
+      return;
+    }
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + 1);
+    blockMut.mutate({ starts_at: s.toISOString(), ends_at: e.toISOString(), kind: "dia", reason: "Día no disponible" });
+  }
+
+  const bookingSlug = tenant.business?.slug ?? null;
+  const bookingUrl =
+    typeof window !== "undefined" && bookingSlug ? `${window.location.origin}/booking/${bookingSlug}` : "";
+
+
+
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
       <div className="flex items-center justify-between flex-wrap gap-4">
