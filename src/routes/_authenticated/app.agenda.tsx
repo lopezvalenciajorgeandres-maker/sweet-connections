@@ -1218,25 +1218,50 @@ function NewApptModal({
             )}
 
             {selected ? (
-              <div className="rounded-lg bg-secondary p-3 text-xs grid grid-cols-3 gap-2">
-                <div>
-                  Saldo que debe
-                  <div className={`font-medium ${selected.balance_cents > 0 ? "text-destructive" : "text-emerald-600"}`}>
+              <div className="rounded-lg bg-secondary p-3 text-xs space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    Valor del servicio
+                    <div className="font-medium text-foreground">{formatMoney(selected.total_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Valor por sesión
+                    <div className="font-medium text-foreground">{formatMoney(selected.session_price_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Abonos
+                    <div className="font-medium text-emerald-600">{formatMoney(selected.paid_cents, currency)}</div>
+                  </div>
+                  <div>
+                    Sesiones agendadas
+                    <div className="font-medium text-foreground">
+                      {selected.sessions_done} de {selected.sessions_total}
+                    </div>
+                  </div>
+                  <div>
+                    Sesiones pendientes
+                    <div className="font-medium text-foreground">
+                      {Math.max(0, selected.sessions_total - selected.sessions_done)}
+                      {" → "}
+                      <span className="text-primary">
+                        {Math.max(0, selected.sessions_total - selected.sessions_done - 1)} tras esta cita
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    Estado
+                    <div className="font-medium text-foreground">{selected.settled ? "A paz y salvo" : "Con saldo"}</div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between border-t border-border pt-2">
+                  <span>Saldo pendiente por pagar</span>
+                  <span className={`font-semibold ${selected.balance_cents > 0 ? "text-destructive" : "text-emerald-600"}`}>
                     {formatMoney(selected.balance_cents, currency)}
-                  </div>
-                </div>
-                <div>
-                  Sesiones restantes
-                  <div className="font-medium text-foreground">
-                    {selected.sessions_remaining} de {selected.sessions_total}
-                  </div>
-                </div>
-                <div>
-                  Estado
-                  <div className="font-medium text-foreground">{selected.settled ? "A paz y salvo" : "Con saldo"}</div>
+                  </span>
                 </div>
               </div>
             ) : (
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Valor total del tratamiento</label>
