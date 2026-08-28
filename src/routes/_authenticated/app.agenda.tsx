@@ -755,10 +755,18 @@ function EditTimeModal({
           {appt.client?.full_name ?? "Cliente"}
           {appt.service?.name ? ` · ${appt.service.name}` : ""}
         </p>
+        <div className="rounded-xl border border-border bg-secondary/50 p-3 text-sm flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor del servicio</span>
+          <span className="font-medium">
+            {servicePriceCents != null ? formatMoney(servicePriceCents, currency) : "—"}
+          </span>
+        </div>
         {treatment && (
           <div className="rounded-xl border border-border bg-card p-4 space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Tratamiento</h3>
+              <h3 className="text-sm font-semibold">
+                Tratamiento{treatment.service_name ? ` · ${treatment.service_name}` : ""}
+              </h3>
               {treatment.settled ? (
                 <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600">
                   A paz y salvo
@@ -773,54 +781,74 @@ function EditTimeModal({
                 </span>
               )}
             </div>
+            {!linked && (
+              <p className="text-[11px] text-muted-foreground">
+                Tratamiento en curso de este cliente (esta cita no está vinculada a él).
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
                 <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor total</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={treatTotal}
-                  onChange={(e) => setTreatTotal(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
-                />
+                {linked ? (
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={treatTotal}
+                    onChange={(e) => setTreatTotal(e.target.value)}
+                    className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                  />
+                ) : (
+                  <div className="font-medium">{formatMoney(treatment.total_cents, currency)}</div>
+                )}
               </div>
               <div>
                 <label className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones programadas</label>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={treatSessions}
-                  onChange={(e) => setTreatSessions(e.target.value)}
-                  className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
-                />
+                {linked ? (
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={treatSessions}
+                    onChange={(e) => setTreatSessions(e.target.value)}
+                    className="mt-0.5 w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-medium"
+                  />
+                ) : (
+                  <div className="font-medium">{treatment.sessions_total}</div>
+                )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones realizadas</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones agendadas</div>
                 <div className="font-medium">{treatment.sessions_done}</div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones restantes</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Sesiones pendientes</div>
                 <div className="font-medium">
                   {Math.max(
                     0,
-                    (Number(treatSessions) || treatment.sessions_total) - treatment.sessions_done,
+                    (linked ? Number(treatSessions) || treatment.sessions_total : treatment.sessions_total) -
+                      treatment.sessions_done,
                   )}
                 </div>
               </div>
-
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Abonado</div>
-                <div className="font-medium">{formatMoney(treatment.paid_cents, currency)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Valor por sesión</div>
+                <div className="font-medium">{formatMoney(treatment.session_price_cents, currency)}</div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Saldo pendiente</div>
-                <div className="font-medium text-amber-600">{formatMoney(treatment.balance_cents, currency)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Abonos</div>
+                <div className="font-medium text-emerald-600">{formatMoney(treatment.paid_cents, currency)}</div>
+              </div>
+              <div className="col-span-2 border-t border-border pt-2 flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Saldo pendiente por pagar</div>
+                <div className={`font-semibold ${treatment.balance_cents > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                  {formatMoney(treatment.balance_cents, currency)}
+                </div>
               </div>
             </div>
           </div>
         )}
+
         <div>
           <label className="text-xs text-muted-foreground">Fecha</label>
           <input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" />
