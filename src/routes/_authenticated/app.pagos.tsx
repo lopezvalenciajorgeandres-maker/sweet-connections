@@ -490,11 +490,15 @@ function PaymentModal({ clients, services, receivables, treatments, preselected,
           {(isPartial || summary) && (
             <Field
               label="Saldo pendiente por pagar"
-              hint={alreadyPaid > 0 ? `Ya abonado antes: ${formatMoney(alreadyPaid, currency)}` : undefined}
+              hint={[
+                alreadyPaid > 0 ? `Ya abonado antes: ${formatMoney(alreadyPaid, currency)}` : null,
+                abonoCents > 0 ? `Quedará: ${formatMoney(pendingAfter, currency)}` : null,
+              ].filter(Boolean).join(" · ") || undefined}
             >
               <input readOnly className={`${inputClass} bg-secondary`} value={formatMoney(due, currency)} />
             </Field>
           )}
+
           {isTransfer && (
             <Field label="Banco / entidad *">
               <select className={inputClass} value={bank} onChange={(e) => setBank(e.target.value)}>
