@@ -1145,7 +1145,17 @@ function NewApptModal({
 
         <div>
           <label className="text-xs text-muted-foreground">Cliente existente</label>
-          <select value={clientId} onChange={(e) => { setClientId(e.target.value); setNewClient(null); }} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm">
+          <select
+            value={clientId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setClientId(id);
+              setNewClient(null);
+              const open = treatments.find((t) => t.client_id === id && t.status === "open");
+              setTreatmentId(open ? open.id : "");
+            }}
+            className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+          >
             <option value="">— Ninguno —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}
           </select>
