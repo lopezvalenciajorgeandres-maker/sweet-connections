@@ -487,8 +487,40 @@ function Agenda() {
       </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Consejo: arrastra una cita y suéltala en otro día u hora para reagendarla automáticamente.
+        Consejo: arrastra una cita y suéltala en otro día u hora para reagendarla automáticamente. Usa el candado de cada
+        franja (o “Bloquear día”) para reservar espacios: lo que bloquees desaparece al instante del enlace de reservas.
       </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3">
+        <Link2 className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">Enlace de reservas para clientes</span>
+        {bookingUrl ? (
+          <>
+            <code className="truncate rounded bg-secondary px-2 py-1 text-xs">{bookingUrl}</code>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(bookingUrl);
+                toast.success("Enlace copiado");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+            >
+              <Copy className="h-3.5 w-3.5" /> Copiar
+            </button>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(`Hola! Puedes reservar tu cita aquí: ${bookingUrl}`)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#25D366] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+            >
+              <MessageCircle className="h-3.5 w-3.5" /> Enviar por WhatsApp
+            </a>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">Configura tu negocio en Ajustes para generar el enlace.</span>
+        )}
+      </div>
+
 
       <div className="mt-6 rounded-2xl overflow-x-auto border border-[#2a2320] bg-[#1a1512] text-neutral-100 shadow-lg">
         <div className="min-w-[820px]">
